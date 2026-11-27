@@ -63,8 +63,12 @@ private struct HomeMeetingRowSurface: ViewModifier {
 }
 
 extension View {
-    func homeMeetingRowSurface(isOpen: Bool, isHovering: Bool = false) -> some View {
-        modifier(HomeMeetingRowSurface(isOpen: isOpen, isHovering: isHovering))
+    func homeMeetingRowSurface(
+        isOpen: Bool,
+        isHovering: Bool = false,
+        horizontalPadding: CGFloat = HomeMeetingRowLayout.cardPadding
+    ) -> some View {
+        modifier(HomeMeetingRowSurface(isOpen: isOpen, isHovering: isHovering, horizontalPadding: horizontalPadding))
     }
 
     /// Return opens a focused row, like Space does for any button.

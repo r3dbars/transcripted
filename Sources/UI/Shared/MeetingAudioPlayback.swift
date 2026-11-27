@@ -181,6 +181,12 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
             isPlaying = !startPaused
             isPaused = startPaused
         } else {
+            // If a previous optimistic load had not produced live players yet,
+            // clear its state now so cancelling it cannot leave a phantom Pause.
+            if players.isEmpty && activeAttachmentID != nil {
+                isLoading = false
+                clearActivePlaybackState()
+            }
             loadingAttachmentID = attachment.id
             pendingStartTime = clampedStart
             pendingStartPaused = startPaused
@@ -192,7 +198,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
             self.loadingAttachmentID = nil
             self.isLoading = false
             guard let loaded, candidates.indices.contains(loaded.index) else {
-                if !rejectsStartPastEnd {
+                if !rejectsStartPastEnd || (self.players.isEmpty && self.activeAttachmentID != nil) {
                     self.stop()
                 }
                 self.unavailablePlaybackID = self.playbackID(for: attachment, choice: requestedChoice)
@@ -226,6 +232,9 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         // System). Starting there would finish instantly and reset the player,
         // so leave whatever is playing alone and just beep.
         if rejectsStartPastEnd, startTime > 0, startTime >= loadedDuration {
+            if players.isEmpty && activeAttachmentID != nil {
+                stop()
+            }
             NSSound.beep()
             return
         }
@@ -309,6 +318,12 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         isLoading = false
         pendingStartTime = 0
         pendingStartPaused = false
+        unavailablePlaybackID = nil
+        clearActivePlaybackState()
+    }
+
+    /// Resets live players and transport state without cancelling an in-flight load.
+    private func clearActivePlaybackState() {
         seekSettleDeadline = 0
         stopProgressTimer()
         releasePlayers()
@@ -316,7 +331,6 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         activeChoiceID = nil
         isPlaying = false
         isPaused = false
-        unavailablePlaybackID = nil
         currentTime = 0
         duration = 0
     }
@@ -532,6 +546,12 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         guard !isLoading, isPlaying else { return }
         guard players.contains(where: { ObjectIdentifier($0) == finishedID }) else { return }
         guard !players.contains(where: { $0.isPlaying }) else { return }
+        if loadingAttachmentID != nil {
+            // A reject-path timestamp load is in flight: reset the finished track
+            // without bumping loadGeneration so the pending click is not dropped.
+            clearActivePlaybackState()
+            return
+        }
         stop()
     }
 
@@ -624,94 +644,62 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     }
 
     private func updatePlaybackTime() {
-        guard let live = livePlayerTime() else {
-            currentTime = 0
-            return
-        }
-        currentTime = live
+        currentTime = livePlayerTime() ?? 0
     }
 
     private func playbackID(for attachment: MeetingAudioAttachment, choice: MeetingAudioPlaybackChoice?) -> String {
         "\(attachment.id)#\(choice?.id ?? "default")"
     }
 
-    /// "0:19", "32:10", "1:02:03": the clock the Meetings card bar and its
-    /// transcript times show.
-    nonisolated static func clockText(_ time: TimeInterval) -> String {
-        formatTime(time)
-    }
+    /// "0:19", "32:10", "1:02:03": the clock the Meetings card bar and its transcript times show.
+    nonisolated static func clockText(_ time: TimeInterval) -> String { formatTime(time) }
 
     private nonisolated static func formatTime(_ time: TimeInterval) -> String {
         let totalSeconds = max(0, Int(time.rounded(.down)))
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
-
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        }
-
-        return String(format: "%d:%02d", minutes, seconds)
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
     }
 }
 
-/// Players opened off the main actor and handed to it once. Nothing touches
-/// them on the way, so moving them across is safe.
+/// Players opened off the main actor and handed to it once.
 private final class LoadedPlayers: @unchecked Sendable {
     let players: [AVAudioPlayer]
-
-    init(players: [AVAudioPlayer]) {
-        self.players = players
-    }
+    init(players: [AVAudioPlayer]) { self.players = players }
 }
 
 enum MeetingAudioPlaybackLoadingPolicy {
-    /// Retained audio can be recompressed (WAV→M4A) or moved after the row was
-    /// scanned. Resolve to the on-disk file (stem-rematch) so playback follows
-    /// the drift instead of going silently "Unavailable" on a stale path.
+    /// Resolve stem-rematched audio files after WAV→M4A recompression or moves.
     static func playableURL(for url: URL) -> URL {
         OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
     }
 
     /// Choice ids are "<file stem>:<path>"; the stem names the source.
-    static func sourceStem(ofChoiceID id: String) -> String {
-        String(id.prefix { $0 != ":" })
-    }
+    static func sourceStem(ofChoiceID id: String) -> String { String(id.prefix { $0 != ":" }) }
 
     static func choice(in attachment: MeetingAudioAttachment, sourceStem: String) -> MeetingAudioPlaybackChoice? {
         attachment.playbackChoices.first { Self.sourceStem(ofChoiceID: $0.id) == sourceStem }
     }
 
-    /// Source for a transcript-row click with no user pick: the row's own
-    /// track while the meeting only has split Mic/System files, else the
-    /// default (the Mix or single recording already holds every speaker).
-    static func rowChoice(
-        in attachment: MeetingAudioAttachment,
-        rowSourceStem: String?
-    ) -> MeetingAudioPlaybackChoice? {
+    /// Source for a transcript-row click with no user pick.
+    static func rowChoice(in attachment: MeetingAudioAttachment, rowSourceStem: String?) -> MeetingAudioPlaybackChoice? {
         let fallback = attachment.defaultPlaybackChoice
-        guard let rowSourceStem,
-              let fallback,
+        guard let rowSourceStem, let fallback,
               !["playback", "recording"].contains(Self.sourceStem(ofChoiceID: fallback.id)) else {
             return fallback
         }
         return choice(in: attachment, sourceStem: rowSourceStem) ?? fallback
     }
 
-    static func choices(
-        for attachment: MeetingAudioAttachment,
-        preferredChoice: MeetingAudioPlaybackChoice?
-    ) -> [MeetingAudioPlaybackChoice] {
+    static func choices(for attachment: MeetingAudioAttachment, preferredChoice: MeetingAudioPlaybackChoice?) -> [MeetingAudioPlaybackChoice] {
         let choices = attachment.playbackChoices
-        guard let preferredChoice else {
+        guard let preferredChoice, choices.contains(where: { $0.id == preferredChoice.id }) else {
             return choices.first.map { [$0] } ?? []
         }
-        guard choices.contains(where: { $0.id == preferredChoice.id }) else {
-            return choices.first.map { [$0] } ?? []
-        }
-
         // Source-aware controls should not silently switch from System to Mic.
-        // If the selected source cannot load, the user can choose another retained source.
         return [preferredChoice]
     }
 }

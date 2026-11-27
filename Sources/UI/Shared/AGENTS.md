@@ -55,7 +55,7 @@ Presentation, tokens and support:
 ## Rules
 
 - **One path to change a saved meeting.** Deletes, renames, Undo and rewrites go through `HomeMeetingDeletion`, `HomeMeetingRename`, `CaptureUndo` and the transcript-update serializer. Anything that deletes checks the path is under the capture library first.
-- **Retained meeting-audio playback stays** (root `AGENTS.md`): clicking a row's time plays from there; rows don't follow the playhead.
+- **Retained meeting-audio playback stays** (root `AGENTS.md`): clicking a row's time plays from there; the unified transcript follows playback and pauses auto-follow when the reader scrolls (owner-approved 2026-11-27).
 - **Own files resolve through `OwnFileResolver`.** Don't cache a scanned URL past a refresh; files get recompressed and renamed in the background.
 - **Nothing here sends transcript text, titles, speaker names or paths off the device.** The privacy-safe support summary is `Sources/Observability/SupportDiagnosticsBundle.swift`.
 - **Swift concurrency.** Constants used off the main actor are `nonisolated static let`; off-main work goes through a continuation over GCD (see the parent's census note).

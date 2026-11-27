@@ -44,7 +44,7 @@ Manual checks by area (do the ones your change touches):
 
 - Dictation: starts, stops and pastes cleanly; the island's hover, messages and cap countdown still read right.
 - Meetings: the detected-meeting prompt appears only when it should and Record / Not now / Remind work; the overlay records cleanly; imported audio from the menu bar lands in Meetings.
-- Home: opens quickly and load-more works on a large library; retained audio plays (clicking a row's time plays from there; the transcript doesn't follow the playhead); failed meetings offer play, reveal in Finder and retry from the preserved files.
+- Home: opens quickly and load-more works on a large library; retained audio plays (clicking a row's time plays from there; the unified transcript follows playback and pauses auto-follow when the reader scrolls); failed meetings offer play, reveal in Finder and retry from the preserved files.
 - Speakers: clips preview, duplicates surface, rename and merge work; the island review names voices, plays clips, and Later leaves the rest for Speakers, where the same "Who spoke?" card asks one meeting at a time (Done, Undo, Skip, and the Meetings row's "2 to name" jump).
 - Menu bar, Settings window, permissions onboarding and the first-run window open correctly; first-run CTA copy follows permission and model state.
 

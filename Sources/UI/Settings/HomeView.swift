@@ -373,6 +373,7 @@ struct HomeFailedMeetingInlineRow: View {
                     .transition(.opacity)
             }
         }
+        .padding(.horizontal, Layout.cardPadding)
         .background {
             if isOpen {
                 HomeMeetingOutsideClickMonitor(
@@ -387,7 +388,7 @@ struct HomeFailedMeetingInlineRow: View {
                     .accessibilityHidden(true)
             }
         }
-        .homeMeetingRowSurface(isOpen: isOpen)
+        .homeMeetingRowSurface(isOpen: isOpen, horizontalPadding: 0)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
         .help(item.detail)
         .accessibilityElement(children: .contain)
