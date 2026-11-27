@@ -14,6 +14,10 @@ func testMeetingTranscriptStylerV2() {
         testV2SidecarFailureNeverFailsTheTranscriptSave()
         testTurnMergingLimits()
         testV2FrontmatterPassOverV2OutputMovesNothing()
+        testV2PreservesHandEditedSummaryAndAiHeading()
+        testV2SkipsMergingDuplicateSameChannelSpeakerRows()
+        testV2PreservesRecordedAtOffsetAndKeepsKeysWithoutCaptureID()
+        testV2DeletionIgnoresSymlinkedMetaDirectory()
     }
 }
 
@@ -302,6 +306,7 @@ private func testV2SidecarFailureNeverFailsTheTranscriptSave() {
 
     assertEqual(url.lastPathComponent, "2026-11-26 Roadmap sync.md")
     assertTrue(markdown.contains("format_version: 2"), "the transcript is still restyled")
+    assertTrue(markdown.contains("transcription_engine: parakeet_local"), "pipeline keys stay in frontmatter when sidecar write fails")
     assertEqual(
         (try? String(contentsOf: directory.appendingPathComponent(".meta"), encoding: .utf8)) ?? "",
         "not a folder",
@@ -338,6 +343,11 @@ private func testTurnMergingLimits() {
     )
     let merged = MeetingTranscriptDialogue.merged([turn(0), turn(8), turn(16), turn(30), turn(36)])
     assertEqual(MeetingTranscriptDialogue.merged(merged), merged, "merging merged turns changes nothing")
+
+    let outOfOrder = [turn(0, "You", "a"), turn(7, "You", "b"), turn(5, "You", "c")]
+    let once = MeetingTranscriptDialogue.merged(outOfOrder)
+    assertEqual(MeetingTranscriptDialogue.merged(once), once, "out-of-order timestamps merge idempotently")
+    assertEqual(once.map(\.text), ["a c b"], "stable-sorting before merge orders by start time")
 }
 
 private func testV2FrontmatterPassOverV2OutputMovesNothing() {
@@ -351,4 +361,116 @@ private func testV2FrontmatterPassOverV2OutputMovesNothing() {
     assertEqual(second.lines, first.lines, "v2 frontmatter is a fixed point")
     assertTrue(second.movedValues.isEmpty, "nothing left to move, so the sidecar's raw values stay: \(second.movedValues)")
 }
+
+private func testV2PreservesHandEditedSummaryAndAiHeading() {
+    let bodyWithUserSummary = """
+    # Meeting at 7:58 PM
+
+    Recorded Nov 26, 2026 at 7:58 PM  •  8m  •  1 turn
+
+    ## Summary
+
+    My own notes: we agreed to ship Friday.
+
+    ## Transcript
+
+    [00:00] **You:** Ship Friday.
+    """
+    let kept = MeetingTitlesBody.settingSummary(
+        "Model generated summary.",
+        replacing: "Earlier model summary.",
+        in: bodyWithUserSummary
+    )
+    assertEqual(kept, bodyWithUserSummary, "hand-edited ## Summary stays untouched")
+
+    let bodyWithModelSummary = bodyWithUserSummary.replacingOccurrences(
+        of: "My own notes: we agreed to ship Friday.",
+        with: "Earlier model summary."
+    )
+    let replaced = MeetingTitlesBody.settingSummary(
+        "Updated model summary.",
+        replacing: "Earlier model summary.",
+        in: bodyWithModelSummary
+    )
+    assertTrue(replaced.contains("Updated model summary."), "matching previous model summary updates cleanly")
+    assertFalse(replaced.contains("Earlier model summary."), "old model summary is removed")
+
+    let directory = v2TemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let labeled = v2RawTranscript(
+        extraFrontmatter: "ai_title: \"Billing switch\"\nai_title_replaces: \"Roadmap sync\"\n"
+    )
+    let (_, markdown) = v2Restyle(labeled, in: directory)
+    assertTrue(markdown.contains("\n# Billing switch\n"), "restyle keeps active ai_title on the H1 heading")
+}
+
+private func testV2SkipsMergingDuplicateSameChannelSpeakerRows() {
+    let directory = v2TemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let raw = v2RawTranscript(
+        speakers: """
+        speakers:
+          - id: "1"
+            channel: system
+            name: "Dana"
+            confidence: medium
+            source: db
+          - id: "2"
+            channel: system
+            name: "Dana"
+            confidence: medium
+            source: db
+        """,
+        transcript: """
+        [00:00] [System/Dana] First cluster.
+
+        [00:03] [System/Dana] Second cluster.
+        """
+    )
+    let (_, markdown) = v2Restyle(raw, in: directory)
+    assertTrue(markdown.contains("[00:00] **Dana:** First cluster."), markdown)
+    assertTrue(markdown.contains("[00:03] **Dana:** Second cluster."), "duplicate same-channel clusters stay separate rows")
+}
+
+private func testV2PreservesRecordedAtOffsetAndKeepsKeysWithoutCaptureID() {
+    let raw = TranscriptFrontmatter.lines(in: v2RawTranscript(extraFrontmatter: "recorded_at: 2026-11-26T10:00:00+02:00\n")) ?? []
+    let out = MeetingTranscriptV2Frontmatter.render(
+        lines: raw,
+        titleLine: "title: \"Roadmap sync\"",
+        recordedAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    assertTrue(out.lines.contains("recorded_at: 2026-11-26T10:00:00+02:00"), "existing recorded_at offset survives restyle")
+
+    let withoutID = raw.filter { !$0.hasPrefix("capture_id:") && !$0.hasPrefix("transcript_id:") }
+    let unpruned = MeetingTranscriptV2Frontmatter.render(
+        lines: withoutID,
+        titleLine: "title: \"Roadmap sync\"",
+        recordedAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    assertTrue(unpruned.movedValues.isEmpty, "without capture_id no pipeline keys are dropped")
+    assertTrue(unpruned.lines.contains("transcription_engine: parakeet_local"), "pipeline keys stay when capture_id is missing")
+}
+
+private func testV2DeletionIgnoresSymlinkedMetaDirectory() {
+    let root = v2TemporaryDirectory()
+    let outside = v2TemporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: outside)
+    }
+    let outsideFile = outside.appendingPathComponent("\(v2CaptureID).json")
+    try? "{}".write(to: outsideFile, atomically: true, encoding: .utf8)
+    let metaSymlink = root.appendingPathComponent(".meta")
+    try? FileManager.default.createSymbolicLink(at: metaSymlink, withDestinationURL: outside)
+
+    let transcriptURL = root.appendingPathComponent("2026-11-26 Roadmap sync.md")
+    try? v2RawTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+    guard let item = RecentMeetingsScanner.loadRecent(limit: 5, directory: root).first else {
+        assertTrue(false, "expected scanned meeting item for symlinked .meta test")
+        return
+    }
+    let plan = HomeMeetingDeletion.plan(for: item)
+    assertTrue(plan.metadataSidecarURLs.isEmpty, "symlinked .meta directory is never targeted for deletion")
+}
+
 

@@ -183,14 +183,15 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: title)
         }
 
-        let renderedFrontmatter = renderFrontmatter(
+        var renderedFrontmatter = renderFrontmatter(
             lines: document.frontmatterLines,
             title: title,
             keepsWriterTitleLine: document.explicitTitle?.isEmpty == false,
-            recordedAt: document.recordedAt
+            recordedAt: document.recordedAt,
+            prunePipelineKeys: true
         )
         let body = renderBody(document: document, title: title)
-        let updated = renderedFrontmatter.text + "\n\n" + body + "\n"
+        var updated = renderedFrontmatter.text + "\n\n" + body + "\n"
         let renameOutcome = renameTranscriptArtifactsIfNeeded(
             at: url,
             title: title,
@@ -199,26 +200,46 @@ enum MeetingTranscriptStyler {
         )
         let finalURL = renameOutcome.url
 
-        if renameOutcome.shouldPersistStyling, updated != raw {
-            do {
-                try TranscriptFileRewrite.write(updated, to: finalURL)
-                FileManager.default.restrictFileToOwnerOnly(at: finalURL)
+        if renameOutcome.shouldPersistStyling {
+            // Write the sidecar BEFORE pruning pipeline keys from the Markdown;
+            // if the sidecar cannot be written, keep those keys in frontmatter
+            // so nothing is lost.
+            if !renderedFrontmatter.movedValues.isEmpty {
+                let sidecarWritten: Bool
                 if let captureID = renderedFrontmatter.captureID {
-                    MeetingMetadataSidecar.merge(
+                    sidecarWritten = MeetingMetadataSidecar.merge(
                         renderedFrontmatter.movedValues,
                         forTranscript: finalURL,
                         captureID: captureID
                     )
+                } else {
+                    sidecarWritten = false
                 }
-            } catch {
-                logFailure(
-                    event: "meeting_transcript_write_failed",
-                    message: "Failed to write styled meeting transcript",
-                    context: [
-                        "file": finalURL.lastPathComponent,
-                        "error": error.localizedDescription
-                    ]
-                )
+                if !sidecarWritten {
+                    renderedFrontmatter = renderFrontmatter(
+                        lines: document.frontmatterLines,
+                        title: title,
+                        keepsWriterTitleLine: document.explicitTitle?.isEmpty == false,
+                        recordedAt: document.recordedAt,
+                        prunePipelineKeys: false
+                    )
+                    updated = renderedFrontmatter.text + "\n\n" + body + "\n"
+                }
+            }
+            if updated != raw {
+                do {
+                    try TranscriptFileRewrite.write(updated, to: finalURL)
+                    FileManager.default.restrictFileToOwnerOnly(at: finalURL)
+                } catch {
+                    logFailure(
+                        event: "meeting_transcript_write_failed",
+                        message: "Failed to write styled meeting transcript",
+                        context: [
+                            "file": finalURL.lastPathComponent,
+                            "error": error.localizedDescription
+                        ]
+                    )
+                }
             }
         }
 
@@ -295,7 +316,7 @@ enum MeetingTranscriptStyler {
             microphoneAudioUnusable: values["microphone_audio_unusable"] == "true",
             transcriptEntries: transcriptEntries,
             speakerChannels: speakerChannels,
-            preservedSummarySection: summarySection(in: frontmatter.body),
+            preservedSummarySection: MeetingTitlesBody.summarySection(in: frontmatter.body),
             preservedTrailingSections: trailingBodySections(in: frontmatter.body)
         )
     }
@@ -367,21 +388,6 @@ enum MeetingTranscriptStyler {
         return blocks
     }
 
-    /// The on-device `## Summary` section (`MeetingTitlesFrontmatterWriter`),
-    /// when it sits before the transcript, so a second restyle keeps it.
-    private static func summarySection(in body: String) -> String? {
-        let normalized = "\n" + body
-        guard let start = normalized.range(of: "\n## Summary\n") else { return nil }
-        let transcriptStart = ["\n## Transcript\n", "\n## Full Transcript\n"]
-            .compactMap { normalized.range(of: $0)?.lowerBound }
-            .min()
-        if let transcriptStart, transcriptStart < start.lowerBound { return nil }
-        let remaining = normalized[start.upperBound...]
-        let end = remaining.range(of: "\n## ")?.lowerBound ?? remaining.endIndex
-        let text = remaining[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : "## Summary\n\n\(text)"
-    }
-
     /// Keep unknown sections after the transcript intact. Older meeting files
     /// may contain generated summary sections; the app no longer creates or
     /// displays them, but restyling must not erase user-owned Markdown.
@@ -432,21 +438,23 @@ enum MeetingTranscriptStyler {
         lines: [String],
         title: String,
         keepsWriterTitleLine: Bool,
-        recordedAt: Date
+        recordedAt: Date,
+        prunePipelineKeys: Bool = true
     ) -> RenderedFrontmatter {
         // `title:` comes first: the writer's line verbatim for a saved title,
         // else the generated title. The body is now in the v2 grammar, so the
         // header says `format_version: 2` and `transcript_style: styled`
         // (filter-then-emit keeps them from duplicating on repeat passes).
         // Unknown keys pass through; pipeline plumbing and healthy defaults
-        // move to the `.meta/<capture_id>.json` sidecar.
+        // move to the `.meta/<capture_id>.json` sidecar when writable.
         // See docs/capture-format.md.
         let titleLine = (keepsWriterTitleLine ? writerTitleLine(in: lines) : nil)
             ?? "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
         let output = MeetingTranscriptV2Frontmatter.render(
             lines: lines,
             titleLine: titleLine,
-            recordedAt: recordedAt
+            recordedAt: recordedAt,
+            prunePipelineKeys: prunePipelineKeys
         )
         return RenderedFrontmatter(
             text: (["---"] + output.lines + ["---"]).joined(separator: "\n"),
@@ -463,7 +471,10 @@ enum MeetingTranscriptStyler {
         if document.totalWords > 0 {
             detailParts.append("\(document.totalWords) \(document.totalWords == 1 ? "word" : "words")")
         }
-        let turns = MeetingTranscriptDialogue.merged(document.transcriptEntries)
+        let unmergeable = MeetingTranscriptDialogue.duplicateSpeakerKeys(
+            fromFrontmatterLines: document.frontmatterLines
+        )
+        let turns = MeetingTranscriptDialogue.merged(document.transcriptEntries, unmergeable: unmergeable)
         if !turns.isEmpty {
             detailParts.append("\(turns.count) \(turns.count == 1 ? "turn" : "turns")")
         }
@@ -472,8 +483,9 @@ enum MeetingTranscriptStyler {
             ? emptyTranscriptPlaceholder
             : MeetingTranscriptDialogue.render(turns, channels: document.speakerChannels)
 
+        let headingTitle = MeetingTitlesBody.headingTitle(frontmatterLines: document.frontmatterLines, savedTitle: title)
         var rendered = """
-        # \(title)
+        # \(headingTitle)
 
         \(detailParts.joined(separator: "  •  "))
         """

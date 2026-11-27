@@ -199,10 +199,11 @@ enum MeetingTitlesFrontmatterWriter {
             to: writtenTitle ?? document.values["title"],
             in: document.body
         )
+        let previousSummary = document.values[MeetingTitlesKeys.summary]
         if let summary = label.summary.map(yamlSafe), !summary.isEmpty {
-            body = MeetingTitlesBody.settingSummary(summary, in: body)
+            body = MeetingTitlesBody.settingSummary(summary, replacing: previousSummary, in: body)
         } else {
-            body = MeetingTitlesBody.removingSummary(document.values[MeetingTitlesKeys.summary], from: body)
+            body = MeetingTitlesBody.removingSummary(previousSummary, from: body)
         }
         return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(body)"
     }

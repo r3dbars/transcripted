@@ -41,7 +41,8 @@ enum MeetingTranscriptV2Frontmatter {
     static func render(
         lines: [String],
         titleLine: String,
-        recordedAt: Date
+        recordedAt: Date,
+        prunePipelineKeys: Bool = true
     ) -> Output {
         let entries = entries(in: lines)
         let values = TranscriptFrontmatter.values(from: lines)
@@ -51,11 +52,14 @@ enum MeetingTranscriptV2Frontmatter {
 
         let captureIDText = values["capture_id"] ?? values["transcript_id"]
         let captureID = captureIDText.flatMap(UUID.init(uuidString:))
+        // Never drop pipeline keys when there is no capture id (or the caller
+        // fell back because the sidecar could not be written).
+        let shouldPrune = prunePipelineKeys && captureID != nil
         let keptGapEvents = gapEvents(in: entries).filter { !isSubSecondGap($0) }
         let droppedGapCount = gapEvents(in: entries).count - keptGapEvents.count
 
         func keepIf(_ keep: Bool, _ entry: Entry, _ value: String) {
-            if keep {
+            if keep || !shouldPrune {
                 kept.append(entry)
             } else {
                 moved[entry.key ?? ""] = .string(value)
@@ -69,19 +73,31 @@ enum MeetingTranscriptV2Frontmatter {
             }
             let value = values[key] ?? ""
             switch key {
-            case "title", "transcript_style", "format_version", "recorded_at":
+            case "title", "transcript_style", "format_version":
                 continue
+            case "recorded_at":
+                if !value.isEmpty {
+                    head[key] = entry.lines
+                }
             case "capture_id", "capture_type", "date", "time", "duration", "total_word_count":
                 head[key] = entry.lines
             case "sources":
-                // `[mic, system_audio]`, kept as a list.
-                let list = value.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-                moved[key] = .list(list)
+                if !shouldPrune {
+                    kept.append(entry)
+                } else {
+                    // `[mic, system_audio]`, kept as a list.
+                    let list = value.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    moved[key] = .list(list)
+                }
             case _ where movedKeys.contains(key):
-                moved[key] = .string(value)
+                if !shouldPrune {
+                    kept.append(entry)
+                } else {
+                    moved[key] = .string(value)
+                }
             case "system_speakers":
                 keepIf((Int(value) ?? 0) > 0, entry, value)
             case "capture_quality":
@@ -91,22 +107,30 @@ enum MeetingTranscriptV2Frontmatter {
             case "system_audio_signal_verified":
                 keepIf(value != "true", entry, value)
             case "audio_gaps":
-                // The raw values go to the sidecar only when this pass changes
-                // them, so a later pass never overwrites them with filtered ones.
-                let count = max(0, (Int(value) ?? 0) - droppedGapCount)
-                if count > 0 {
-                    kept.append(count == Int(value) ? entry : Entry(key: key, lines: ["audio_gaps: \(count)"]))
+                if !shouldPrune {
+                    kept.append(entry)
+                } else {
+                    // The raw values go to the sidecar only when this pass changes
+                    // them, so a later pass never overwrites them with filtered ones.
+                    let count = max(0, (Int(value) ?? 0) - droppedGapCount)
+                    if count > 0 {
+                        kept.append(count == Int(value) ? entry : Entry(key: key, lines: ["audio_gaps: \(count)"]))
+                    }
+                    if count != Int(value) { moved[key] = .string(value) }
                 }
-                if count != Int(value) { moved[key] = .string(value) }
             case "gap_events":
-                if !keptGapEvents.isEmpty {
-                    kept.append(droppedGapCount == 0 ? entry : Entry(
-                        key: key,
-                        lines: ["gap_events:"] + keptGapEvents.map { "  - \(TranscriptFrontmatter.quotedYAMLScalar($0))" }
-                    ))
-                }
-                if droppedGapCount > 0 || keptGapEvents.isEmpty {
-                    moved[key] = .list(gapEvents(in: entries))
+                if !shouldPrune {
+                    kept.append(entry)
+                } else {
+                    if !keptGapEvents.isEmpty {
+                        kept.append(droppedGapCount == 0 ? entry : Entry(
+                            key: key,
+                            lines: ["gap_events:"] + keptGapEvents.map { "  - \(TranscriptFrontmatter.quotedYAMLScalar($0))" }
+                        ))
+                    }
+                    if droppedGapCount > 0 || keptGapEvents.isEmpty {
+                        moved[key] = .list(gapEvents(in: entries))
+                    }
                 }
             case "transcription_language":
                 keepIf(value != "auto", entry, value)
@@ -122,7 +146,9 @@ enum MeetingTranscriptV2Frontmatter {
         }
         head["format_version"] = ["format_version: \(formatVersion)"]
         head["transcript_style"] = ["transcript_style: styled"]
-        head["recorded_at"] = ["recorded_at: \(recordedAtString(recordedAt))"]
+        if head["recorded_at"] == nil {
+            head["recorded_at"] = ["recorded_at: \(recordedAtString(recordedAt))"]
+        }
         if head["date"] == nil {
             head["date"] = ["date: \(DateFormattingHelper.formatDayStamp(recordedAt))"]
             head["time"] = head["time"] ?? ["time: \(DateFormattingHelper.formatTimeOfDay(recordedAt))"]

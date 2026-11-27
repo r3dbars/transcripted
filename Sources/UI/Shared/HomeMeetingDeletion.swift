@@ -177,15 +177,24 @@ enum HomeMeetingDeletion {
     }
 
     /// The meeting's `.meta/<capture_id>.json`, when the transcript is an
-    /// app-owned meeting and the sidecar is a regular file (not a symlink).
+    /// app-owned meeting, `.meta` is a real directory inside the meetings
+    /// folder (never a symlink), and the sidecar is a regular file.
     private static func ownedMetadataSidecarURL(for transcriptURL: URL, fileManager: FileManager) -> URL? {
         guard let captureID = appOwnedMeetingTranscriptValues(transcriptURL).flatMap(TranscriptFrontmatter.captureID(in:)) else {
             return nil
         }
         let url = MeetingMetadataSidecar.url(forTranscript: transcriptURL, captureID: captureID)
+        let metaDirectory = url.deletingLastPathComponent()
+        let dirValues = try? metaDirectory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard dirValues?.isDirectory == true, dirValues?.isSymbolicLink != true else {
+            return nil
+        }
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         guard values?.isRegularFile == true, values?.isSymbolicLink != true,
               fileManager.fileExists(atPath: url.path) else { return nil }
+        let meetingsRoot = canonicalPath(transcriptURL.deletingLastPathComponent())
+        let canonicalSidecar = canonicalPath(url)
+        guard canonicalSidecar.hasPrefix(meetingsRoot + "/") else { return nil }
         return url
     }
 

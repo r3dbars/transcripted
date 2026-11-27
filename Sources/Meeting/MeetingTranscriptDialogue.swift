@@ -33,15 +33,113 @@ enum MeetingTranscriptDialogue {
     /// frequent enough that clicking one still plays close to the words.
     static let mergeMaximumCharacters = 320
 
+    /// A `(channel, plainName)` key used to identify duplicate speaker rows on
+    /// the same channel so two distinct clusters sharing a display name are
+    /// never glued together during turn merging.
+    struct ChannelSpeakerKey: Hashable {
+        let channel: TranscriptFrontmatterDialogue.Channel
+        let name: String
+    }
+
+    /// Returns `(channel, plainName)` pairs that appear in more than one
+    /// frontmatter `speakers:` row.
+    static func duplicateSpeakerKeys(fromFrontmatterLines lines: [String]) -> Set<ChannelSpeakerKey> {
+        var counts: [ChannelSpeakerKey: Int] = [:]
+        var inSpeakers = false
+        var speakersIndent = 0
+        var currentName: String?
+        var currentChannel: TranscriptFrontmatterDialogue.Channel?
+        var inRow = false
+
+        func finishRow() {
+            if inRow, let raw = currentName {
+                let name = plainSpeakerName(raw)
+                if !name.isEmpty {
+                    let key = ChannelSpeakerKey(channel: currentChannel ?? .system, name: name)
+                    counts[key, default: 0] += 1
+                }
+            }
+            currentName = nil
+            currentChannel = nil
+            inRow = false
+        }
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" {
+                if inSpeakers { break }
+                continue
+            }
+            let indent = line.prefix(while: { $0 == " " }).count
+            if !inSpeakers {
+                if trimmed == "speakers:" {
+                    inSpeakers = true
+                    speakersIndent = indent
+                }
+                continue
+            }
+            if !trimmed.isEmpty, indent <= speakersIndent, !trimmed.hasPrefix("-") {
+                break
+            }
+            var entry = Substring(trimmed)
+            if entry.hasPrefix("- ") {
+                finishRow()
+                inRow = true
+                entry = entry.dropFirst(2)
+            }
+            guard inRow else { continue }
+            if entry.hasPrefix("name:") {
+                currentName = TranscriptFrontmatter.unquoteYAMLScalar(
+                    String(entry.dropFirst("name:".count)).trimmingCharacters(in: .whitespaces)
+                )
+            } else if entry.hasPrefix("channel:") {
+                let raw = entry.dropFirst("channel:".count).trimmingCharacters(in: .whitespaces)
+                currentChannel = TranscriptFrontmatterDialogue.Channel(rawValue: raw)
+            }
+        }
+        finishRow()
+        return Set(counts.compactMap { $0.value > 1 ? $0.key : nil })
+    }
+
+    private static func plainSpeakerName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Merges short same-speaker runs ("Oh" / "my god" / "so that the top")
-    /// into readable turns. Starting from v2 output again changes nothing: a
-    /// pair that failed a limit fails it again from the merged turn's start.
-    static func merged(_ turns: [MeetingTranscriptTurn]) -> [MeetingTranscriptTurn] {
+    /// into readable turns. Stable-sorts timed turns first so re-running on
+    /// out-of-order inputs is idempotent, and skips merging names that have
+    /// more than one speaker cluster on the same channel.
+    static func merged(
+        _ turns: [MeetingTranscriptTurn],
+        unmergeable: Set<ChannelSpeakerKey> = []
+    ) -> [MeetingTranscriptTurn] {
+        let ordered: [MeetingTranscriptTurn]
+        if turns.allSatisfy({ $0.seconds != nil }) {
+            ordered = turns.enumerated().sorted { lhs, rhs in
+                let ls = lhs.element.seconds ?? 0
+                let rs = rhs.element.seconds ?? 0
+                return ls != rs ? ls < rs : lhs.offset < rhs.offset
+            }.map(\.element)
+        } else {
+            ordered = turns
+        }
+
         var result: [MeetingTranscriptTurn] = []
         var lastMergedStart: Int?
 
-        for turn in turns {
-            guard let previous = result.last,
+        for turn in ordered {
+            let blockedByDuplicate: Bool
+            if let channel = turn.channel {
+                blockedByDuplicate = unmergeable.contains(
+                    ChannelSpeakerKey(channel: channel, name: plainSpeakerName(turn.name))
+                )
+            } else {
+                blockedByDuplicate = false
+            }
+            guard !blockedByDuplicate,
+                  let previous = result.last,
                   previous.channel == turn.channel,
                   previous.name == turn.name,
                   let firstStart = previous.seconds,
