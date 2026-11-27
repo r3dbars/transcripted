@@ -170,7 +170,10 @@ struct QuietMeetingCard: View {
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onToggleExpanded: () -> Void
+    /// Esc: closes the card and stops playback.
     let onCollapse: () -> Void
+    /// Click outside the card: folds the card without stopping playback.
+    var onOutsideCollapse: (() -> Void)? = nil
     let onCopy: () -> Void
     /// "Who spoke?" on Speakers, when no review can be built here.
     let onWhoSpoke: () -> Void
@@ -184,7 +187,9 @@ struct QuietMeetingCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
     @State private var whoSpokeSession: HomeMeetingWhoSpokeSession?
-    @State private var scrubTime: TimeInterval?
+    @State private var scrubActiveLineIndex: Int?
+    @State private var cachedTimedLines: HomeMeetingTimedLines = .empty
+    @State private var cachedTimedKey: String = ""
 
     private typealias P = HomeMeetingCardPresentation
     private typealias R = HomeMeetingRailPresentation
@@ -227,19 +232,14 @@ struct QuietMeetingCard: View {
                     .transition(.opacity)
             }
         }
-        .modifier(HomeMeetingRowSurface(isOpen: isExpanded, isHovering: isHovering, horizontalPadding: 0))
-        .onHover { isHovering = $0 }
         .background {
             if isExpanded {
-                // Zero-hit-test local click monitor: collapses this card on any
-                // click outside its bounds (margins, right gutter, below the
-                // list, day headers) without competing with buttons inside it.
+                // Attached INSIDE the card's own bounds (before bottom cardSpacing)
+                // so clicks in the 11 pt gap below the card collapse it too.
                 HomeMeetingOutsideClickMonitor(
                     isActive: isExpanded && whoSpokeSession == nil,
-                    onOutsideClick: onCollapse
+                    onOutsideClick: onOutsideCollapse ?? onCollapse
                 )
-                // Hidden control so Esc collapses the opened card. Off while
-                // search has focus, where Esc clears the search first.
                 Button(action: onCollapse) { EmptyView() }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.cancelAction)
@@ -247,6 +247,21 @@ struct QuietMeetingCard: View {
                     .opacity(0)
                     .accessibilityHidden(true)
             }
+        }
+        .modifier(HomeMeetingRowSurface(isOpen: isExpanded, isHovering: isHovering, horizontalPadding: 0))
+        .onHover { isHovering = $0 }
+        .onChange(of: isExpanded) { _, expanded in
+            if !expanded {
+                scrubActiveLineIndex = nil
+            } else {
+                refreshCachedTimedLines()
+            }
+        }
+        .onChange(of: timedCacheKey) { _, _ in
+            refreshCachedTimedLines()
+        }
+        .onAppear {
+            if isExpanded { refreshCachedTimedLines() }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isExpanded)
         .animation(.easeOut(duration: 0.16), value: isHovering)
@@ -410,8 +425,8 @@ struct QuietMeetingCard: View {
                 HomeMeetingInstrumentShell(
                     audio: audio,
                     fallbackDuration: P.durationSeconds(start: item.startDate, end: item.endDate),
-                    timed: timedLines,
-                    scrubTime: $scrubTime
+                    timed: activeTimedLines,
+                    scrubActiveLineIndex: $scrubActiveLineIndex
                 )
                 .padding(.top, 13)
             }
@@ -426,12 +441,13 @@ struct QuietMeetingCard: View {
             HomeMeetingTranscriptReveal(
                 item: item,
                 content: openedContent,
+                timed: activeTimedLines,
                 isLoading: preview == nil,
                 isShown: isTranscriptShown,
                 showsAllLines: showsAllLines,
                 knownPeople: knownPeople,
                 savedSpeakerIDs: savedSpeakerIDs,
-                scrubTime: scrubTime,
+                scrubActiveLineIndex: scrubActiveLineIndex,
                 onToggle: onToggleTranscript,
                 onShowAll: onShowAllLines,
                 onAssignSpeakers: onAssignSpeakers
@@ -446,8 +462,23 @@ struct QuietMeetingCard: View {
         return preview.content
     }
 
-    private var timedLines: HomeMeetingTimedLines {
-        openedContent.map { HomeMeetingTimedLines($0.transcriptLines) } ?? .empty
+    private var timedCacheKey: String {
+        guard let preview, preview.readError == nil else { return "" }
+        return "\(preview.id)#\(preview.content.transcriptLines.count)#\(preview.markdown.count)#\(preview.markdown.hashValue)"
+    }
+
+    private var activeTimedLines: HomeMeetingTimedLines {
+        if cachedTimedKey == timedCacheKey {
+            return cachedTimedLines
+        }
+        return openedContent.map { HomeMeetingTimedLines($0.transcriptLines) } ?? .empty
+    }
+
+    private func refreshCachedTimedLines() {
+        let key = timedCacheKey
+        guard key != cachedTimedKey else { return }
+        cachedTimedKey = key
+        cachedTimedLines = openedContent.map { HomeMeetingTimedLines($0.transcriptLines) } ?? .empty
     }
 
     // MARK: Amber line

@@ -349,6 +349,8 @@ struct HomeFailedMeetingInlineRow: View {
     var onToggleOpen: () -> Void = {}
     /// Esc: closes the card and stops its audio, like a saved card.
     var onCollapse: () -> Void = {}
+    /// Click outside the card: folds the card without stopping playback.
+    var onOutsideCollapse: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
@@ -371,12 +373,11 @@ struct HomeFailedMeetingInlineRow: View {
                     .transition(.opacity)
             }
         }
-        .homeMeetingRowSurface(isOpen: isOpen)
         .background {
             if isOpen {
                 HomeMeetingOutsideClickMonitor(
                     isActive: isOpen,
-                    onOutsideClick: onCollapse
+                    onOutsideClick: onOutsideCollapse ?? onCollapse
                 )
                 Button(action: onCollapse) { EmptyView() }
                     .buttonStyle(.plain)
@@ -386,6 +387,7 @@ struct HomeFailedMeetingInlineRow: View {
                     .accessibilityHidden(true)
             }
         }
+        .homeMeetingRowSurface(isOpen: isOpen)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
         .help(item.detail)
         .accessibilityElement(children: .contain)

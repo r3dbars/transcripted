@@ -3,28 +3,30 @@ import TranscriptedCore
 
 // Unified expandable, auto-following transcript for an opened Meetings card
 // (owner-approved 2026-11-27): sits directly below the milled playback bar as a
-// compact scrollable transcript window (~156 pt) with an "Expand transcript"
-// button at the bottom that smoothly grows the same scrollable view (~420 pt)
-// to read and scroll through the entire meeting.
+// compact scrollable transcript window (up to ~156 pt, sizing naturally to
+// shorter content) with an "Expand transcript" button at the bottom that
+// smoothly grows the same scrollable view (up to ~420 pt).
 //
 // While audio plays (or while scrubbing the rail), the active spoken line is
 // highlighted with a vertical VoicePrint bar and the scroll view smoothly
-// follows along whenever the spoken line advances. Clicking any line's
-// timestamp plays from there, and clicking a speaker name opens the inline
-// one-voice fix (`QuietMeetingSpeakerLabel`).
+// follows along. Manual scrolling pauses auto-follow briefly so the reader can
+// freely scroll up and down without getting yanked back; scrubbing, jumping to
+// a timestamp, or resuming playback resumes following right away.
 
 struct HomeMeetingTranscriptReveal: View {
     let item: RecentMeetingItem
     /// The read transcript, or nil while it loads (or when the read failed).
     let content: HomeMeetingPreviewContent?
+    /// Pre-parsed line start times, cached once per preview on the parent card.
+    let timed: HomeMeetingTimedLines
     let isLoading: Bool
-    /// False = compact scrollable viewport (~156 pt); true = tall expanded viewport (~420 pt).
+    /// False = compact scrollable viewport (up to 156 pt); true = tall expanded viewport (up to 420 pt).
     let isShown: Bool
     let showsAllLines: Bool
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
-    /// Live drag time while scrubbing the rail above, or nil when not scrubbing.
-    var scrubTime: TimeInterval? = nil
+    /// Live active line index while scrubbing the rail above, or nil when not scrubbing.
+    var scrubActiveLineIndex: Int? = nil
     let onToggle: () -> Void
     let onShowAll: () -> Void
     let onAssignSpeakers: ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -32,12 +34,16 @@ struct HomeMeetingTranscriptReveal: View {
     @ObservedObject private var playback = MeetingAudioPlayback.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpandHovered = false
+    /// Measured intrinsic content height so short transcripts never leave blank space.
+    @State private var measuredContentHeight: CGFloat = 0
+    /// Pauses auto-follow for a few seconds after the reader manually scrolls.
+    @State private var manualScrollPauseUntil: Date = .distantPast
 
     private typealias P = HomeMeetingCardPresentation
 
-    private static let compactHeight: CGFloat = 156
-    private static let expandedHeight: CGFloat = 420
-    private static let compactLineThreshold = 4
+    private static let compactMaxHeight: CGFloat = 156
+    private static let expandedMaxHeight: CGFloat = 420
+    private static let manualScrollGraceSeconds: TimeInterval = 6
 
     private var isAudioActiveHere: Bool {
         guard let audio = item.audio else { return false }
@@ -48,19 +54,10 @@ struct HomeMeetingTranscriptReveal: View {
         isAudioActiveHere && playback.isPlaying
     }
 
-    private var followTime: TimeInterval? {
-        if let scrubTime { return scrubTime }
-        guard isAudioActiveHere else { return nil }
-        return playback.currentTime
-    }
-
-    private var timedLines: HomeMeetingTimedLines {
-        content.map { HomeMeetingTimedLines($0.transcriptLines) } ?? .empty
-    }
-
     private var activeLineIndex: Int? {
-        guard let followTime else { return nil }
-        return timedLines.activeIndex(at: followTime)
+        if let scrubActiveLineIndex { return scrubActiveLineIndex }
+        guard isAudioActiveHere else { return nil }
+        return timed.activeIndex(at: playback.currentTime)
     }
 
     var body: some View {
@@ -82,6 +79,8 @@ struct HomeMeetingTranscriptReveal: View {
             if content.transcriptLines.isEmpty {
                 let text = content.fallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
+                    let cap = isShown ? Self.expandedMaxHeight : Self.compactMaxHeight
+                    let needsExpand = measuredContentHeight > Self.compactMaxHeight + 8
                     ScrollView {
                         Text(text)
                             .font(LibraryTokens.body)
@@ -91,30 +90,41 @@ struct HomeMeetingTranscriptReveal: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 4)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                                measuredContentHeight = height
+                            }
                     }
-                    .frame(maxHeight: isShown ? Self.expandedHeight : Self.compactHeight)
-                    expandFooter(lineCount: nil)
+                    .frame(height: measuredContentHeight > 0 ? min(measuredContentHeight, cap) : nil)
+                    .frame(maxHeight: cap)
+                    if needsExpand {
+                        expandFooter(lineCount: nil)
+                    }
                 }
             } else {
                 let all = content.transcriptLines
-                let needsExpand = all.count > Self.compactLineThreshold
-                let targetHeight: CGFloat? = needsExpand
-                    ? (isShown ? Self.expandedHeight : Self.compactHeight)
-                    : nil
+                // Computed ONCE per render before ForEach (never inside the loop).
+                let active = activeLineIndex
+                let cap = isShown ? Self.expandedMaxHeight : Self.compactMaxHeight
+                let estimatedHeight = CGFloat(all.count) * 30
+                let effectiveContentHeight = measuredContentHeight > 0 ? measuredContentHeight : estimatedHeight
+                let needsExpand = effectiveContentHeight > Self.compactMaxHeight + 8
+                let viewportHeight = min(effectiveContentHeight, cap)
 
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(all.indices, id: \.self) { index in
                                 let line = all[index]
-                                let isActiveLine = index == activeLineIndex
                                 HomeMeetingTranscriptLineRow(
                                     line: line,
                                     index: index,
                                     audio: item.audio,
-                                    isActive: isActiveLine,
+                                    isActive: index == active,
                                     knownPeople: knownPeople,
                                     isSavedPerson: line.identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false,
+                                    onPlayRequested: {
+                                        manualScrollPauseUntil = .distantPast
+                                    },
                                     onAssign: { assignment, completion in
                                         onAssignSpeakers([assignment], completion)
                                     }
@@ -124,8 +134,16 @@ struct HomeMeetingTranscriptReveal: View {
                         }
                         .padding(.vertical, 4)
                         .padding(.trailing, 4)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            if height > 0 { measuredContentHeight = height }
+                        }
                     }
-                    .frame(height: targetHeight)
+                    .frame(height: viewportHeight)
+                    .onScrollPhaseChange { _, newPhase in
+                        if newPhase == .interacting || newPhase == .decelerating {
+                            manualScrollPauseUntil = Date().addingTimeInterval(Self.manualScrollGraceSeconds)
+                        }
+                    }
                     .overlay(alignment: .bottom) {
                         if needsExpand && !isShown {
                             LinearGradient(
@@ -133,17 +151,23 @@ struct HomeMeetingTranscriptReveal: View {
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
-                            .frame(height: 26)
+                            .frame(height: 24)
                             .allowsHitTesting(false)
                         }
                     }
-                    .onChange(of: activeLineIndex) { _, newIndex in
-                        guard let newIndex, isPlayingHere || scrubTime != nil else { return }
-                        scroll(proxy, to: newIndex)
+                    .onChange(of: active) { _, newIndex in
+                        guard let newIndex else { return }
+                        if scrubActiveLineIndex != nil {
+                            manualScrollPauseUntil = .distantPast
+                            scroll(proxy, to: newIndex, immediate: true)
+                        } else if isPlayingHere, Date() >= manualScrollPauseUntil {
+                            scroll(proxy, to: newIndex, immediate: false)
+                        }
                     }
                     .onChange(of: isPlayingHere) { _, playing in
-                        guard playing, let current = activeLineIndex else { return }
-                        scroll(proxy, to: current)
+                        guard playing, let current = active else { return }
+                        manualScrollPauseUntil = .distantPast
+                        scroll(proxy, to: current, immediate: false)
                     }
                 }
 
@@ -162,11 +186,11 @@ struct HomeMeetingTranscriptReveal: View {
         }
     }
 
-    private func scroll(_ proxy: ScrollViewProxy, to index: Int) {
-        if reduceMotion || scrubTime != nil {
+    private func scroll(_ proxy: ScrollViewProxy, to index: Int, immediate: Bool) {
+        if reduceMotion || immediate {
             proxy.scrollTo(index, anchor: .center)
         } else {
-            withAnimation(.easeOut(duration: 0.28)) {
+            withAnimation(.easeOut(duration: 0.26)) {
                 proxy.scrollTo(index, anchor: .center)
             }
         }
@@ -208,10 +232,6 @@ struct HomeMeetingTranscriptReveal: View {
 
 // MARK: - Transcript line
 
-/// One speaker + text + timestamp line inside the unified transcript view.
-/// Highlights cleanly with the speaker's VoicePrint accent bar when active,
-/// supports inline speaker renaming, text selection, and clicking to play from
-/// that line's timestamp.
 private struct HomeMeetingTranscriptLineRow: View {
     let line: HomeMeetingTranscriptLine
     let index: Int
@@ -219,6 +239,7 @@ private struct HomeMeetingTranscriptLineRow: View {
     let isActive: Bool
     let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
+    let onPlayRequested: () -> Void
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
     @State private var isHovering = false
@@ -301,6 +322,7 @@ private struct HomeMeetingTranscriptLineRow: View {
 
     private func play(from start: TimeInterval) {
         guard let audio else { return }
+        onPlayRequested()
         MeetingAudioPlayback.shared.play(
             audio,
             from: start,

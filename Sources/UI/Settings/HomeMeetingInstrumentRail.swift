@@ -7,10 +7,10 @@ import SwiftUI
 // rail, the clickable two-tone clock, a hairline, the speed button and, when
 // split tracks were kept, Mix / You / Others.
 //
-// Crucially, interactive buttons (-15 s, Play/Pause, +15 s, Speed, Source) sit
-// OUTSIDE TimelineView(.animation) so high-frequency playhead updates never
-// rebuild their hit-testing or drop hover/click events. Played color follows
-// the active speaker's VoicePrint color (paper ink for You or silence).
+// Interactive buttons (-15 s, Play/Pause, +15 s, Speed, Source) sit OUTSIDE
+// TimelineView(.animation) so high-frequency playhead updates never rebuild
+// their hit-testing or drop hover/click events. Played color follows the
+// active speaker's VoicePrint color (paper ink for You or silence).
 
 // MARK: - Surfaces
 
@@ -95,8 +95,9 @@ struct HomeMeetingInstrumentShell: View {
     let audio: MeetingAudioAttachment
     let fallbackDuration: TimeInterval?
     let timed: HomeMeetingTimedLines
-    /// Shared live drag time so the unified transcript below scrolls live while scrubbing.
-    @Binding var scrubTime: TimeInterval?
+    /// Only updates when a scrub drag crosses into a different transcript line,
+    /// avoiding 60–120 Hz redraws of the card and transcript.
+    @Binding var scrubActiveLineIndex: Int?
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
     @State private var showsRemaining = false
@@ -112,10 +113,10 @@ struct HomeMeetingInstrumentShell: View {
         return 0
     }
 
-    /// Published (quarter-second / scrub) time for stable button chrome so
+    /// Published (quarter-second / drag) time for stable button chrome so
     /// transport buttons never rebuild at 60–120 Hz.
     private var stableTime: TimeInterval {
-        if let scrubTime { return scrubTime }
+        if let dragFraction, total > 0 { return dragFraction * total }
         return isActive ? playback.currentTime : 0
     }
 
@@ -138,8 +139,13 @@ struct HomeMeetingInstrumentShell: View {
                 skip(by: -15)
             }
 
-            HomeRailPlayDisc(audio: audio, accent: activeAccent, isPlaying: isPlayingHere)
-                .padding(.horizontal, 3)
+            HomeRailPlayDisc(
+                audio: audio,
+                fallbackDuration: total > 0 ? total : fallbackDuration,
+                accent: activeAccent,
+                isPlaying: isPlayingHere
+            )
+            .padding(.horizontal, 3)
 
             HomeRailSkipButton(seconds: 15, isDisabled: !canSkipForward) {
                 skip(by: 15)
@@ -153,14 +159,19 @@ struct HomeMeetingInstrumentShell: View {
                 timed: timed,
                 showsRemaining: $showsRemaining,
                 dragFraction: $dragFraction,
-                onDrag: { fraction in
+                onDragChanged: { fraction in
                     dragFraction = fraction
-                    scrubTime = fraction * total
+                    let nextLine = fraction.flatMap { total > 0 ? timed.activeIndex(at: $0 * total) : nil }
+                    if scrubActiveLineIndex != nextLine {
+                        scrubActiveLineIndex = nextLine
+                    }
                 },
                 onCommit: { fraction in
                     seek(to: fraction)
                     dragFraction = nil
-                    scrubTime = nil
+                    if scrubActiveLineIndex != nil {
+                        scrubActiveLineIndex = nil
+                    }
                 },
                 onSkip: skip(by:)
             )
@@ -202,6 +213,12 @@ struct HomeMeetingInstrumentShell: View {
         .task(id: audio.id) {
             playback.probeDurationIfNeeded(for: audio)
         }
+        .onDisappear {
+            dragFraction = nil
+            if scrubActiveLineIndex != nil {
+                scrubActiveLineIndex = nil
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.home.meeting.player")
     }
@@ -221,9 +238,14 @@ struct HomeMeetingInstrumentShell: View {
             playback.seek(audio, progress: clamped)
             if playback.isPaused { playback.resume() }
         } else if total > 0 {
-            playback.play(audio, from: clamped * total)
+            playback.play(
+                audio,
+                from: clamped * total,
+                fallbackDuration: total,
+                rejectsStartPastEnd: false
+            )
         } else {
-            playback.toggle(audio)
+            playback.toggle(audio, fallbackDuration: fallbackDuration)
         }
     }
 
@@ -231,7 +253,12 @@ struct HomeMeetingInstrumentShell: View {
         if isActive {
             playback.skip(audio, by: seconds)
         } else if seconds > 0, total > 0 {
-            playback.play(audio, from: min(seconds, total))
+            playback.play(
+                audio,
+                from: min(seconds, total),
+                fallbackDuration: total,
+                rejectsStartPastEnd: false
+            )
         }
     }
 }
@@ -248,7 +275,7 @@ private struct HomeMeetingLiveScrubCluster: View {
     let timed: HomeMeetingTimedLines
     @Binding var showsRemaining: Bool
     @Binding var dragFraction: Double?
-    let onDrag: (Double) -> Void
+    let onDragChanged: (Double?) -> Void
     let onCommit: (Double) -> Void
     let onSkip: (TimeInterval) -> Void
 
@@ -271,7 +298,7 @@ private struct HomeMeetingLiveScrubCluster: View {
                     accent: accent,
                     isPlaying: isPlayingHere,
                     timed: timed,
-                    onDrag: onDrag,
+                    onDragChanged: onDragChanged,
                     onCommit: onCommit,
                     onSkip: onSkip
                 )
@@ -323,6 +350,7 @@ private struct HomeMeetingLiveScrubCluster: View {
 
 private struct HomeRailPlayDisc: View {
     let audio: MeetingAudioAttachment
+    let fallbackDuration: TimeInterval?
     let accent: Color
     let isPlaying: Bool
 
@@ -342,7 +370,7 @@ private struct HomeRailPlayDisc: View {
 
     var body: some View {
         Button {
-            playback.toggle(audio, choice: selectedChoice)
+            playback.toggle(audio, choice: selectedChoice, fallbackDuration: fallbackDuration)
         } label: {
             ZStack {
                 Circle()
@@ -433,7 +461,7 @@ private struct HomeRailSpeedButton: View {
     }
 }
 
-// MARK: - Shared button style (kept for callers like QuietHomeLibrary / card actions if needed)
+// MARK: - Shared button style
 
 struct HomeRailHoverFillStyle: ButtonStyle {
     var cornerRadius: CGFloat = 6

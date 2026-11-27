@@ -64,7 +64,8 @@ struct HomeSettingsPage: View {
     let onLoadMoreMeetings: () -> Void
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
-    let onCollapseMeetingExpansion: (String?) -> Void
+    /// `(targetID, stopsPlayback)`: Esc stops playback, clicking outside keeps it playing.
+    let onCollapseMeetingExpansion: (String?, Bool) -> Void
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -295,7 +296,8 @@ struct HomeSettingsPage: View {
                     knownPeople: knownPeople,
                     savedSpeakerIDs: savedSpeakerIDs,
                     onToggleExpanded: { onOpenMeeting(meeting) },
-                    onCollapse: { onCollapseMeetingExpansion(meeting.id) },
+                    onCollapse: { onCollapseMeetingExpansion(meeting.id, true) },
+                    onOutsideCollapse: { onCollapseMeetingExpansion(meeting.id, false) },
                     onCopy: { onCopyMeeting(meeting) },
                     onWhoSpoke: { onWhoSpoke(meeting) },
                     makeWhoSpokeSession: { onClose in makeWhoSpokeSession(meeting, onClose) },
@@ -322,7 +324,8 @@ struct HomeSettingsPage: View {
                 clock: clock,
                 escapeClosesCard: !isSearchFocused,
                 onToggleOpen: { onToggleFailedMeeting(failedMeeting) },
-                onCollapse: { onCollapseMeetingExpansion(MeetingsPageOpenState.failedMeetingKey(failedMeeting.id)) }
+                onCollapse: { onCollapseMeetingExpansion(MeetingsPageOpenState.failedMeetingKey(failedMeeting.id), true) },
+                onOutsideCollapse: { onCollapseMeetingExpansion(MeetingsPageOpenState.failedMeetingKey(failedMeeting.id), false) }
             )
         }
     }

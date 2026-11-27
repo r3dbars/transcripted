@@ -332,12 +332,12 @@ extension TranscriptedSettingsView {
             onCopyMeeting: { meeting in
                 handleCopyMeeting(meeting)
             },
-            onCollapseMeetingExpansion: { targetID in
+            onCollapseMeetingExpansion: { targetID, stopsPlayback in
                 if let targetID {
                     guard homeMeetingOpenState.isOpen(targetID, expandedID: homeExpandedMeetingID)
                         || homeExpandedMeetingID == targetID else { return }
                 }
-                collapseHomeMeetingExpansion()
+                collapseHomeMeetingExpansion(stopsPlayback: stopsPlayback)
             },
             knownPeople: homeKnownPeopleOptions,
             savedSpeakerIDs: homeSavedSpeakerIDs,
@@ -384,7 +384,7 @@ extension TranscriptedSettingsView {
         )
         .homeBackgroundTapCatcher {
             if homeExpandedMeetingID != nil {
-                collapseHomeMeetingExpansion()
+                collapseHomeMeetingExpansion(stopsPlayback: false)
             }
         }
         .task {

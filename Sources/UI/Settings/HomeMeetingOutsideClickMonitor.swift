@@ -2,12 +2,14 @@ import AppKit
 import SwiftUI
 
 /// Watches for clicks outside an expanded Meetings card in the same window
-/// (margins, right gutter, below the list, day headers) without adding any
-/// hit-testing view over the card or competing with buttons inside it.
+/// (margins, right gutter, gaps between cards, below the list, day headers)
+/// without adding any hit-testing view over the card or competing with buttons
+/// inside it.
 ///
-/// Defers collapse until one runloop tick after mouse-up so clicking a closed
-/// card below the open one still opens that card cleanly instead of shifting
-/// it out from under the pointer on mouse-down.
+/// Ignores activating clicks when bringing the app/window back from another
+/// app, ignores drags and scrollbar clicks, and defers collapse by one runloop
+/// tick after mouse-up so clicking a closed card below the open one still
+/// opens that card cleanly.
 struct HomeMeetingOutsideClickMonitor: NSViewRepresentable {
     let isActive: Bool
     let onOutsideClick: () -> Void
@@ -36,25 +38,25 @@ final class OutsideClickAnchorView: NSView {
     private var downMonitor: Any?
     private var upMonitor: Any?
     private var pendingDownPoint: NSPoint?
-    private var isMonitoring = false
+    private var wantsMonitoring = false
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func setMonitoring(_ active: Bool) {
-        guard active != isMonitoring else { return }
-        isMonitoring = active
-        if active {
-            installMonitors()
-        } else {
-            removeMonitors()
-        }
+        wantsMonitoring = active
+        syncMonitors()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
+        syncMonitors()
+    }
+
+    private func syncMonitors() {
+        if wantsMonitoring && window != nil {
+            installMonitors()
+        } else {
             removeMonitors()
-            isMonitoring = false
         }
     }
 
@@ -84,9 +86,13 @@ final class OutsideClickAnchorView: NSView {
 
     private func handleMouseDown(_ event: NSEvent) {
         pendingDownPoint = nil
-        guard isMonitoring, let hostWindow = window, event.window === hostWindow else { return }
+        guard wantsMonitoring,
+              NSApp.isActive,
+              let hostWindow = window,
+              hostWindow.isKeyWindow,
+              event.window === hostWindow else { return }
         let localPoint = convert(event.locationInWindow, from: nil)
-        if bounds.contains(localPoint) { return }
+        if visibleRect.contains(localPoint) { return }
         if let hit = hostWindow.contentView?.hitTest(event.locationInWindow),
            Self.isInsideScroller(hit) {
             return
@@ -97,17 +103,21 @@ final class OutsideClickAnchorView: NSView {
     private func handleMouseUp(_ event: NSEvent) {
         guard let downPoint = pendingDownPoint else { return }
         pendingDownPoint = nil
-        guard isMonitoring, let hostWindow = window, event.window === hostWindow else { return }
+        guard wantsMonitoring,
+              NSApp.isActive,
+              let hostWindow = window,
+              hostWindow.isKeyWindow,
+              event.window === hostWindow else { return }
         // Ignore drags (window move, text selection, card drag).
         let distance = hypot(event.locationInWindow.x - downPoint.x, event.locationInWindow.y - downPoint.y)
         guard distance <= 6 else { return }
         let localPoint = convert(event.locationInWindow, from: nil)
-        guard !bounds.contains(localPoint) else { return }
+        guard !visibleRect.contains(localPoint) else { return }
 
         // Defer one tick so a Button click on another meeting card runs first
         // and replaces the open card before we decide whether to collapse.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isMonitoring, self.window != nil else { return }
+            guard let self, self.wantsMonitoring, self.window != nil else { return }
             self.onOutsideClick?()
         }
     }

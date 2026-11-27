@@ -6,52 +6,54 @@ import SwiftUI
 /// subtly visible at rest and blooms to 11 pt on hover or drag. Hovering or
 /// dragging floats "14:25 · Priya" over the pointer using pure coordinate
 /// positioning so changing speaker names never cause layout feedback jitter.
+///
+/// Uses `@GestureState` for the live drag fraction so gesture cancellation
+/// (Cmd-Tab, window blur, Esc) automatically resets drag state without getting
+/// stuck.
 struct HomeMeetingScrubRail: View {
     let time: TimeInterval
     let total: TimeInterval
     let accent: Color
     let isPlaying: Bool
     let timed: HomeMeetingTimedLines
-    let onDrag: (Double) -> Void
+    let onDragChanged: (Double?) -> Void
     let onCommit: (Double) -> Void
     let onSkip: (TimeInterval) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverX: CGFloat?
-    @State private var isDragging = false
+    @GestureState private var gestureDragFraction: Double?
 
+    private var isDragging: Bool { gestureDragFraction != nil }
     private var isEngaged: Bool { hoverX != nil || isDragging }
 
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 1)
-            let fraction = total > 0 ? CGFloat(min(max(time / total, 0), 1)) : 0
+            let effectiveTime = gestureDragFraction.map { $0 * total } ?? time
+            let fraction = total > 0 ? CGFloat(min(max(effectiveTime / total, 0), 1)) : 0
             let thumbX = width * fraction
             let trackHeight: CGFloat = isEngaged ? 5 : 3
             let thumbSize: CGFloat = isDragging ? 12 : (isEngaged ? 11 : 7)
 
             ZStack(alignment: .leading) {
-                // Background track
                 Capsule()
                     .fill(HomeMeetingCardSurface.railTrack)
                     .frame(height: trackHeight)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isEngaged)
 
-                // Hover ghost preview fill
                 if let hoverX, !isDragging, total > 0 {
                     Capsule()
                         .fill(HomeMeetingCardSurface.railGhost)
                         .frame(width: min(max(hoverX, 0), width), height: trackHeight)
                 }
 
-                // Played progress fill
                 if total > 0, thumbX > 0.5 {
                     Capsule()
                         .fill(isPlaying || isEngaged ? accent : accent.opacity(0.62))
                         .frame(width: max(thumbX, trackHeight), height: trackHeight)
                 }
 
-                // Playhead pip: always subtly visible when duration is known, blooms on hover/drag
                 if total > 0 {
                     Circle()
                         .fill(isEngaged ? HomeMeetingCardSurface.thumb : accent)
@@ -88,14 +90,11 @@ struct HomeMeetingScrubRail: View {
             }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { value in
+                    .updating($gestureDragFraction) { value, state, _ in
                         guard total > 0 else { return }
-                        isDragging = true
-                        let frac = Double(min(max(value.location.x / width, 0), 1))
-                        onDrag(frac)
+                        state = Double(min(max(value.location.x / width, 0), 1))
                     }
                     .onEnded { value in
-                        isDragging = false
                         guard total > 0 else { return }
                         let frac = Double(min(max(value.location.x / width, 0), 1))
                         onCommit(frac)
@@ -104,6 +103,9 @@ struct HomeMeetingScrubRail: View {
         }
         .frame(minWidth: 90)
         .frame(height: 28)
+        .onChange(of: gestureDragFraction) { _, newFraction in
+            onDragChanged(newFraction)
+        }
         .accessibilityElement()
         .accessibilityLabel(Text("Playback position"))
         .accessibilityValue(Text(
