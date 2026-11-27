@@ -11,8 +11,8 @@ final class NotchIslandDropView: NSView {
     var onAction: ((NotchIslandAction) -> Void)?
     private(set) var drop: NotchIslandDrop
     let stack = NSStackView()
-    private var youLane: NotchIslandBarsView?
-    private var callLane: NotchIslandBarsView?
+    /// The quiet strip's You and Others dots, brightened by each side's level.
+    var meetingDots: (you: NSView, others: NSView)?
     private var countdownButton: NotchIslandButton?
     /// A dictation message's words and hint. A click on them is someone
     /// reading, so it never reaches the island's click-to-dismiss.
@@ -25,6 +25,8 @@ final class NotchIslandDropView: NSView {
     /// The island's "Who was on this call?" view, kept alive by the
     /// controller so typing and playback survive the drop-down being rebuilt.
     private let speakerReviewView: NSView?
+    /// The live meeting words, kept alive by the controller like the review.
+    let liveTranscriptView: NotchIslandLiveTranscriptView?
     /// The dictation's live words, kept alive by the controller the same way.
     let dictationPreviewView: NotchIslandDictationPreviewView?
 
@@ -33,10 +35,12 @@ final class NotchIslandDropView: NSView {
         live: NotchIslandLiveValues,
         targetIcon: () -> NSImage?,
         speakerReviewView: NSView? = nil,
+        liveTranscriptView: NotchIslandLiveTranscriptView? = nil,
         dictationPreviewView: NotchIslandDictationPreviewView? = nil
     ) {
         self.drop = drop
         self.speakerReviewView = speakerReviewView
+        self.liveTranscriptView = liveTranscriptView
         self.dictationPreviewView = dictationPreviewView
         super.init(frame: NSRect(x: 0, y: 0, width: NotchIslandGeometry.dropWidth, height: 10))
         stack.orientation = .vertical
@@ -84,8 +88,9 @@ final class NotchIslandDropView: NSView {
     }
 
     func pushLevels(mic: Float, system: Float) {
-        youLane?.push(mic)
-        callLane?.push(system)
+        guard let meetingDots else { return }
+        Self.glow(meetingDots.you, level: mic)
+        Self.glow(meetingDots.others, level: system)
     }
 
     // MARK: Building
@@ -122,26 +127,10 @@ final class NotchIslandDropView: NSView {
             return
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, _, let micAction):
-            let muted: Bool
-            if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
-            let subtitle: String
-            if unverified {
-                subtitle = NotchIslandMeetingCopy.cantConfirmCallAudio
-            } else {
-                switch note {
-                case .off?: subtitle = NotchIslandMeetingCopy.callAudioOff
-                case .onForNextMeeting?: subtitle = NotchIslandMeetingCopy.callAudioNextMeeting
-                case nil: subtitle = muted ? NotchIslandMeetingCopy.micMuted : NotchIslandMeetingCopy.bothSides
-                }
-            }
-            add(titleBlock("Recording", subtitle))
-            let you = NotchIslandBarsView(count: 46, maxHeight: 20, color: NotchIslandPalette.accent)
-            let call = NotchIslandBarsView(count: 46, maxHeight: 20, color: NSColor(white: 1, alpha: 0.8))
-            youLane = you
-            callLane = call
-            add(lane("You", you))
-            add(lane(NotchIslandMeetingCopy.otherSideLane, call))
+        case .meetingControls(_, _, let showsTranscript, _, _):
+            // No title block: the wing already says it's recording.
+            buildMeetingControls(showsTranscript: showsTranscript, live: live)
+            return
         case .meetingPrompt(let prompt):
             // A countdown is the ring on the button that fires, never a line.
             add(titleBlock(prompt.title, prompt.detail, wrapsDetail: true))
@@ -171,12 +160,24 @@ final class NotchIslandDropView: NSView {
     /// Draws the drop-down's buttons from their plain description.
     func addButtons(_ specs: [NotchIslandDropButton], targetIcon: () -> NSImage?) {
         guard !specs.isEmpty else { return }
+        let (leading, trailing) = buttonViews(specs, targetIcon: targetIcon)
+        add(buttonRow(leading: leading, trailing: trailing))
+    }
+
+    /// The buttons for `specs`, split by placement.
+    func buttonViews(_ specs: [NotchIslandDropButton], targetIcon: () -> NSImage?) -> (leading: [NSView], trailing: [NSView]) {
         var leading: [NSView] = []
         var trailing: [NSView] = []
         for spec in specs {
-            let view = button(spec.title, Self.style(for: spec.role), spec.action, symbol: spec.symbol,
+            let view: NotchIslandButton
+            if spec.action == .meetingCopyTranscript {
+                view = copyTranscriptButton(spec)
+            } else {
+                view = button(spec.title, Self.style(for: spec), spec.action, symbol: spec.symbol,
                               appIcon: spec.showsTargetAppIcon ? targetIcon() : nil,
                               accessibilityLabel: spec.accessibilityLabel)
+            }
+            view.toolTip = spec.toolTip
             if let ring = spec.countdown {
                 let action = spec.action
                 view.startCountdown(seconds: ring.secondsLeft, fromFraction: ring.fraction) { secondsLeft in
@@ -187,7 +188,7 @@ final class NotchIslandDropView: NSView {
             }
             if spec.placement == .leading { leading.append(view) } else { trailing.append(view) }
         }
-        add(buttonRow(leading: leading, trailing: trailing))
+        return (leading, trailing)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -206,7 +207,7 @@ final class NotchIslandDropView: NSView {
         view.widthAnchor.constraint(lessThanOrEqualToConstant: Self.contentWidth).isActive = true
     }
 
-    private func row(_ views: [NSView]) -> NSStackView {
+    func row(_ views: [NSView]) -> NSStackView {
         let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.alignment = .centerY
@@ -263,14 +264,15 @@ final class NotchIslandDropView: NSView {
         return label
     }
 
-    private func lane(_ name: String, _ bars: NotchIslandBarsView) -> NSView {
-        let label = NotchIslandPalette.label(name, font: TextRole.small.nsFont(weight: .semibold), color: NotchIslandPalette.secondaryText)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: 40).isActive = true
-        return row([label, bars])
+    /// A button's style comes from its role and look, not its title.
+    static func style(for spec: NotchIslandDropButton) -> NotchIslandButton.Style {
+        switch spec.look {
+        case .icon: return .icon
+        case .quietPill: return .translucent
+        case .pill: return style(for: spec.role)
+        }
     }
 
-    /// A button's style comes from its role, not its title.
     static func style(for role: NotchIslandPromptButtonRole) -> NotchIslandButton.Style {
         switch role {
         case .standard: return .plain
@@ -281,7 +283,9 @@ final class NotchIslandDropView: NSView {
     }
 
     func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil, appIcon: NSImage? = nil, accessibilityLabel: String? = nil) -> NotchIslandButton {
-        let button = NotchIslandButton(title: title, style: style, symbolName: symbol, appIcon: appIcon)
+        // The recording footer's icons and Stop are a size smaller.
+        let height: CGFloat = style == .icon || style == .translucent ? 28 : 32
+        let button = NotchIslandButton(title: title, style: style, height: height, symbolName: symbol, appIcon: appIcon)
         if let accessibilityLabel {
             button.setAccessibilityLabel(accessibilityLabel)
         }

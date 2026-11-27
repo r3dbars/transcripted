@@ -653,6 +653,9 @@ final class MeetingSessionController: ObservableObject {
 
     func clearActiveRecordingIdentity(keepingForStopTeardown: Bool = false) {
         stoppingRecordingIdentity = keepingForStopTeardown ? activeRecordingIdentity : nil
+        if let identity = activeRecordingIdentity {
+            LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
+        }
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil

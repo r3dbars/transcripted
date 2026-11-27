@@ -147,6 +147,9 @@ struct NotchIslandMeetingContent: Equatable {
     /// The island skipped the "can't hear the other side" question so the
     /// meeting could start at once; ask it now, from the island, once.
     var asksAboutCallAudio = false
+    /// "Live meeting words" is on: the recording drop-down shows the
+    /// conversation so far instead of the quiet You · Others strip.
+    var showsLiveTranscript = false
     /// "Discard this recording?" is asking, with this many seconds before
     /// it gives up and keeps the recording. Nil while nobody asked.
     var discardConfirmSecondsLeft: Double? = nil
@@ -276,6 +279,8 @@ enum NotchIslandAction: Equatable {
     case meetingCallAudioDismiss
     case meetingOpen
     case meetingDismissError
+    /// Copy on the live meeting words.
+    case meetingCopyTranscript
     case callRecord
     case callDismiss
     case callRemind
@@ -291,7 +296,7 @@ enum NotchIslandAction: Equatable {
         switch self {
         case .dictationStop, .dictationCancel, .dictationMessageAction, .dictationDismissMessage:
             return .dictation
-        case .copyLastDictation, .pasteLastDictation:
+        case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
         case .meetingPrompt, .meetingMicMute, .meetingMicUnmute, .meetingStop,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
@@ -330,7 +335,7 @@ enum NotchIslandDrop: Equatable {
     case dictationNote(String)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, recordingID: UUID? = nil, micAction: NotchIslandAction? = nil)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, recordingID: UUID? = nil, micAction: NotchIslandAction? = nil)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -638,6 +643,7 @@ enum NotchIslandPresentation {
             return .meetingControls(
                 callAudioNote: meeting.callAudioNote,
                 systemAudioUnverified: meeting.systemAudioUnverified,
+                showsTranscript: meeting.showsLiveTranscript,
                 recordingID: meeting.recordingID,
                 micAction: meeting.recordingID.flatMap { id in
                     meeting.micMuted ? .meetingMicUnmute(id) : (meeting.micMuteControlEnabled ? .meetingMicMute(id) : nil)

@@ -252,6 +252,20 @@ func testNotchIslandPresentation() {
         )
         assertEqual(NotchIslandAction.meetingMicMute(id).owner, .meeting)
 
+        var transcribing = recording()
+        transcribing.showsLiveTranscript = true
+        assertEqual(
+            notchLayout(meeting: transcribing, expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            "with Live meeting words on, hovering shows the conversation"
+        )
+        assertEqual(notchLayout(meeting: transcribing).right, [.meetingMeters], "the collapsed island doesn't change")
+        assertEqual(
+            notchLayout(dictation: listening(), meeting: transcribing, expanded: true).drop,
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            "a dictation inside the meeting keeps the live words on hover"
+        )
+
         let meetingDrop = NotchIslandDrop.meetingControls(callAudioNote: nil, systemAudioUnverified: false)
         assertEqual(
             notchLayout(dictation: listening(), meeting: recording(), expanded: true).drop,
@@ -578,7 +592,7 @@ func testNotchIslandPresentation() {
             ("justInserted", .justInserted(text: "Hello there", words: 2)),
             ("meetingPreparing", .meetingPreparing(title: "Starting", detail: "Getting the mic ready.")),
             ("meetingControls", .meetingControls(callAudioNote: nil, systemAudioUnverified: false)),
-            ("meetingControls with note", .meetingControls(callAudioNote: .off, systemAudioUnverified: true)),
+            ("meetingControls with note", .meetingControls(callAudioNote: .off, systemAudioUnverified: true, showsTranscript: true)),
             ("meetingPrompt", .meetingPrompt(prompt)),
             ("meetingSaved", .meetingSaved(title: "Standup")),
             ("meetingSaved untitled", .meetingSaved(title: nil)),

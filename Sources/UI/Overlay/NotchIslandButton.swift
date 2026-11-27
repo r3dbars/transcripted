@@ -1,6 +1,7 @@
 // NotchIslandButton.swift
 // The island's pill buttons: plain, accent (the white primary), warning and
-// destructive, with an optional countdown ring. Split out of NotchIslandView.swift.
+// destructive, with an optional countdown ring; plus the recording footer's
+// borderless round icon and translucent Stop. Split out of NotchIslandView.swift.
 
 import AppKit
 
@@ -14,6 +15,11 @@ final class NotchIslandButton: NSButton {
         case link
         /// White with black text: the speaker review's Done and Open.
         case white
+        /// A borderless round icon (no title drawn); a faint fill on hover.
+        case icon
+        /// Dark translucent fill, thin light border, white text: the
+        /// recording's Stop, so the island never shows a glaring white block.
+        case translucent
     }
 
     var onPress: (() -> Void)?
@@ -38,24 +44,27 @@ final class NotchIslandButton: NSButton {
         self.style = style
         self.buttonHeight = height
         // The review's white Done / Open pill is a little roomier (mockup: 20 px).
-        self.horizontalPadding = style == .link ? 4 : (style == .white ? 20 : (height < 26 ? 9 : 14))
+        self.horizontalPadding = style == .icon ? 0 : (style == .link ? 4 : (style == .white ? 20 : (height < 26 ? 9 : 14)))
+        self.symbolPointSize = style == .icon ? fontSize : (style == .translucent ? fontSize - 4 : fontSize - 2)
         super.init(frame: .zero)
         isBordered = false
         setButtonType(.momentaryChange)
         wantsLayer = true
         layer?.cornerRadius = height / 2
+        if style == .translucent {
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor(white: 1, alpha: 0.16).cgColor
+        }
         let weight: NSFont.Weight = style == .link
             ? .medium
             : ((style == .accent || style == .destructive || style == .white || height < 26) ? .bold : .semibold)
         attributedTitle = NSAttributedString(
-            string: title,
+            string: style == .icon ? "" : title,
             attributes: [.font: NSFont.systemFont(ofSize: fontSize, weight: weight), .foregroundColor: foreground]
         )
-        if let symbolName,
-           let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: fontSize - 2, weight: .bold)) {
+        if let symbolName, let image = symbolImage(symbolName) {
             self.image = image
-            imagePosition = .imageLeading
+            imagePosition = style == .icon ? .imageOnly : .imageLeading
             imageHugsTitle = true
             contentTintColor = foreground
         } else if let appIcon {
@@ -76,6 +85,21 @@ final class NotchIslandButton: NSButton {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private let symbolPointSize: CGFloat
+    private var hovered = false
+    private var hoverArea: NSTrackingArea?
+
+    private func symbolImage(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: symbolPointSize, weight: style == .icon ? .medium : .bold))
+    }
+
+    /// Swaps the icon, keeping its size and tint (Copy's brief checkmark).
+    func replaceSymbol(_ name: String) {
+        guard let image = symbolImage(name) else { return }
+        self.image = image
+    }
 
     /// Swaps the words, keeping the font and color ("Copy all" → "Copied").
     func replaceTitle(_ title: String) {
@@ -194,6 +218,8 @@ final class NotchIslandButton: NSButton {
         // The primary action is ink on the black island: a white pill.
         // Green means live, so it is never a button.
         case .accent, .white: return .black
+        case .icon: return NSColor(white: 1, alpha: hovered ? 0.92 : 0.66)
+        case .translucent: return NSColor(white: 1, alpha: 0.92)
         }
     }
 
@@ -206,12 +232,43 @@ final class NotchIslandButton: NSButton {
         case .warning: return NotchIslandPalette.warning.withAlphaComponent(0.22)
         case .link: return .clear
         case .white: return .white
+        case .icon: return NSColor(white: 1, alpha: hovered ? 0.08 : 0)
+        case .translucent: return NSColor(white: 1, alpha: hovered ? 0.14 : 0.10)
         }
     }
 
     override var intrinsicContentSize: NSSize {
+        // A round icon is as wide as it is tall.
+        if style == .icon { return NSSize(width: buttonHeight, height: buttonHeight) }
         let base = super.intrinsicContentSize
         return NSSize(width: ceil(base.width) + horizontalPadding * 2, height: buttonHeight)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard style == .icon || style == .translucent else { return }
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        setHovered(false)
+    }
+
+    private func setHovered(_ value: Bool) {
+        guard style == .icon || style == .translucent, hovered != value else { return }
+        hovered = value
+        contentTintColor = foreground
+        updateBackground()
     }
 
     override var isHighlighted: Bool {
@@ -225,7 +282,10 @@ final class NotchIslandButton: NSButton {
     }
 
     private func updateBackground() {
-        let color = isHighlighted ? fill.blended(withFraction: style == .white ? 0.12 : 0.25, of: .black) ?? fill : fill
+        let pressedFill = style == .icon || style == .translucent
+            ? NSColor(white: 1, alpha: 0.18)
+            : fill.blended(withFraction: style == .white ? 0.12 : 0.25, of: .black) ?? fill
+        let color = isHighlighted ? pressedFill : fill
         layer?.backgroundColor = color.cgColor
     }
 

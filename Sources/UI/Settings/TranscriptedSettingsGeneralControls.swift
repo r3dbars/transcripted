@@ -268,6 +268,27 @@ struct MeetingMicMuteControlRow: View {
     }
 }
 
+/// Settings › Advanced › Meetings: "Live meeting words", off by default.
+/// While on, a recording meeting transcribes live on this Mac and the
+/// island's hover shows the rolling transcript.
+struct LiveMeetingWordsRow: View {
+    @AppStorage(NotchIslandPreferences.showsLiveTranscriptKey)
+    private var showsLiveTranscript = false
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Live meeting words",
+            isOn: $showsLiveTranscript,
+            help: "Show a rolling live transcript in the notch while recording a meeting.",
+            info: GeneralInfo(
+                title: "Live meeting words",
+                message: "Hover the island during a meeting to read and copy what's been said so far. It runs on this Mac. The saved meeting is still transcribed again, with names, after you stop."
+            ),
+            automationIdentifier: "transcripted.settings.advanced.live-meeting-words"
+        )
+    }
+}
+
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool

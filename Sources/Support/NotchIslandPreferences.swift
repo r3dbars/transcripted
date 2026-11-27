@@ -25,4 +25,18 @@ enum NotchIslandPreferences {
     static func allowsMeetingMicChange(toMuted: Bool, userDefaults: UserDefaults = .standard) -> Bool {
         !toMuted || meetingMicMuteControlEnabled(userDefaults: userDefaults)
     }
+
+    /// "Live meeting words": a recording meeting transcribes live, on this
+    /// Mac, so hovering the island shows the conversation so far. Off by
+    /// default (unset reads false): it runs two streaming models for the
+    /// whole call. The saved transcript is unaffected.
+    static let showsLiveTranscriptKey = "notchIslandShowsLiveTranscript"
+
+    static func showsLiveTranscript(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: showsLiveTranscriptKey)
+    }
+
+    static func setShowsLiveTranscript(_ shows: Bool, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(shows, forKey: showsLiveTranscriptKey)
+    }
 }

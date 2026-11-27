@@ -30,6 +30,22 @@ func testNotchIslandPreferences() {
         assertFalse(NotchIslandPreferences.allowsMeetingMicChange(toMuted: true, userDefaults: reopened))
         assertTrue(NotchIslandPreferences.allowsMeetingMicChange(toMuted: false, userDefaults: reopened))
     }
+
+    runSuite("Live meeting words stay off until turned on") {
+        let (defaults, suiteName) = makeNotchIslandPreferencesDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertNil(defaults.object(forKey: NotchIslandPreferences.showsLiveTranscriptKey), "a fresh install has no stored value")
+        assertFalse(
+            NotchIslandPreferences.showsLiveTranscript(userDefaults: defaults),
+            "unset reads off: meetings don't run live transcription unless asked"
+        )
+        NotchIslandPreferences.setShowsLiveTranscript(true, userDefaults: defaults)
+        let reopened = UserDefaults(suiteName: suiteName)!
+        assertTrue(NotchIslandPreferences.showsLiveTranscript(userDefaults: reopened), "turning it on persists")
+        NotchIslandPreferences.setShowsLiveTranscript(false, userDefaults: reopened)
+        assertFalse(NotchIslandPreferences.showsLiveTranscript(userDefaults: defaults), "and turning it off sticks")
+    }
 }
 
 private func makeNotchIslandPreferencesDefaults() -> (UserDefaults, String) {

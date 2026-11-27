@@ -5,7 +5,9 @@
 //
 // The rule on the black island: the primary is the white pill (one per
 // drop-down at most), everything else is a quiet grey pill, and red is only
-// the confirm step of something destructive.
+// the confirm step of something destructive. The recording drop-down is the
+// one quiet exception: its Stop is still the primary but drawn as a dark
+// translucent pill, and Copy / Mute are borderless round icons.
 
 import Foundation
 
@@ -13,6 +15,16 @@ struct NotchIslandDropButton: Equatable {
     enum Placement: Equatable {
         case leading
         case trailing
+    }
+
+    /// How the button is drawn. Most are pills; the recording drop-down
+    /// uses round icons and a translucent Stop so nothing glares.
+    enum Look: Equatable {
+        case pill
+        /// A borderless round icon (`symbol`), its `title` only for VoiceOver.
+        case icon
+        /// A dark translucent pill with a thin light border.
+        case quietPill
     }
 
     var title: String
@@ -25,6 +37,18 @@ struct NotchIslandDropButton: Equatable {
     var countdown: NotchIslandCountdownRing? = nil
     /// "Insert into Slack" carries the app's own icon.
     var showsTargetAppIcon = false
+    var look: Look = .pill
+    /// The hover tip, for buttons that show only an icon.
+    var toolTip: String? = nil
+}
+
+/// The amber pill on a recording's footer: shown only when something is
+/// wrong (mic muted, call audio not connected or unconfirmed). Pressing it
+/// runs `action` when there is one ("Call audio is off" turns it on).
+struct NotchIslandMeetingWarning: Equatable {
+    var text: String
+    var action: NotchIslandAction? = nil
+    var toolTip: String? = nil
 }
 
 enum NotchIslandDropButtons {
@@ -61,22 +85,32 @@ enum NotchIslandDropButtons {
                 .init(title: "Copy", role: .standard, action: .copyLastDictation),
                 .init(title: "Paste again", role: .primary, action: .pasteLastDictation),
             ]
-        case .meetingControls(let note, _, let recordingID, let micAction):
+        case .meetingControls(_, _, let showsTranscript, let recordingID, let micAction):
+            // Call audio's Turn on lives on the warning pill (`meetingWarning`).
             var buttons: [NotchIslandDropButton] = []
-            if note == .off {
-                buttons.append(.init(title: "Turn on", role: .standard, action: .meetingCallAudio,
-                                     placement: .leading, accessibilityLabel: "Turn on call audio"))
+            if showsTranscript {
+                buttons.append(.init(title: "Copy", role: .standard, action: .meetingCopyTranscript,
+                                     placement: .leading, symbol: "doc.on.doc",
+                                     accessibilityLabel: copyTranscriptTip, look: .icon, toolTip: copyTranscriptTip))
             }
             if let micAction {
-                let verb: String
-                if case .meetingMicUnmute = micAction { verb = "Unmute" } else { verb = "Mute" }
-                buttons.append(.init(title: "\(verb) mic", role: .standard, action: micAction,
-                                     accessibilityLabel: "\(verb) Transcripted meeting microphone"))
+                let muted: Bool
+                if case .meetingMicUnmute = micAction { muted = true } else { muted = false }
+                let verb = muted ? "Unmute" : "Mute"
+                // With the transcript, Copy and Mute sit together on the left;
+                // in the strip, Mute sits by Stop on the right.
+                buttons.append(.init(title: verb, role: .standard, action: micAction,
+                                     placement: showsTranscript ? .leading : .trailing,
+                                     symbol: muted ? "mic.slash" : "mic",
+                                     accessibilityLabel: "\(verb) Transcripted meeting microphone",
+                                     look: .icon, toolTip: "\(verb) microphone"))
             }
-            // Stop saves and transcribes: the safe primary, not red. It names
-            // the recording it was drawn for, so a late click can't stop another.
+            // Stop saves and transcribes: the safe primary, not red, drawn as
+            // the quiet translucent pill. It names the recording it was drawn
+            // for, so a late click can't stop another.
             if let recordingID {
-                buttons.append(.init(title: "Stop", role: .primary, action: .meetingStop(recordingID), symbol: "stop.fill"))
+                buttons.append(.init(title: "Stop", role: .primary, action: .meetingStop(recordingID),
+                                     symbol: "stop.fill", look: .quietPill))
             }
             return buttons
         case .meetingPrompt(let prompt):
@@ -129,6 +163,25 @@ enum NotchIslandDropButtons {
                 .init(title: "Turn on", role: .primary, action: .meetingCallAudio, accessibilityLabel: "Turn on call audio"),
             ]
         }
+    }
+
+    static let copyTranscriptTip = "Copy live transcript"
+
+    /// The recording footer's amber pill, or nil when all is well. One at
+    /// most: call audio trouble first, then a muted mic.
+    static func meetingWarning(for drop: NotchIslandDrop) -> NotchIslandMeetingWarning? {
+        guard case .meetingControls(let note, let unverified, _, _, let micAction) = drop else { return nil }
+        if unverified { return .init(text: NotchIslandMeetingCopy.cantConfirmCallAudio) }
+        switch note {
+        case .off?:
+            return .init(text: NotchIslandMeetingCopy.callAudioOff, action: .meetingCallAudio, toolTip: "Turn on call audio")
+        case .onForNextMeeting?:
+            return .init(text: NotchIslandMeetingCopy.callAudioNextMeeting)
+        case nil:
+            break
+        }
+        if case .meetingMicUnmute? = micAction { return .init(text: NotchIslandMeetingCopy.micMuted) }
+        return nil
     }
 
     /// What VoiceOver hears on a button with a countdown ring: what happens

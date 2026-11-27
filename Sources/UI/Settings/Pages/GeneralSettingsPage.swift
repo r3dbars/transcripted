@@ -197,6 +197,8 @@ struct AdvancedSettingsSection<
             SettingsGroup(title: "Meetings", identifier: "transcripted.settings.section.advanced-meetings") {
                 MeetingMicMuteControlRow()
 
+                LiveMeetingWordsRow()
+
                 micProcessingEditor()
 
                 VStack(alignment: .leading, spacing: 0) {

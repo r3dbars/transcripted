@@ -275,6 +275,8 @@ final class NotchIslandView: NSView {
     private var keptDictationDrop: NotchIslandDropView?
     /// Set by the controller while a speaker review is up.
     var speakerReviewView: NSView?
+    /// Set by the controller while a meeting with live meeting words records.
+    var liveTranscriptView: NotchIslandLiveTranscriptView?
     var dictationPreviewView: NotchIslandDictationPreviewView?
     private let edge = NSView()
     private var rowHeight: CGFloat = NotchIslandGeometry.tabRowHeight
@@ -358,6 +360,7 @@ final class NotchIslandView: NSView {
                     live: live,
                     targetIcon: { targetAppIconProvider?() },
                     speakerReviewView: speakerReviewView,
+                    liveTranscriptView: liveTranscriptView,
                     dictationPreviewView: dictationPreviewView
                 )
                 view.onAction = { [weak self] action in self?.onAction?(action) }

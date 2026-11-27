@@ -2,6 +2,24 @@ import Foundation
 
 @MainActor
 func testLiveMeetingCaptionTrack() async {
+    runSuite("Mic-only captions never construct an unused recognizer") {
+        var created = 0
+        let micOnly = LiveMeetingCaptionTrackSet(capturesSystemAudio: false) {
+            created += 1
+            return created
+        }
+        assertEqual(created, 1, "only the captured microphone gets a recognizer")
+        assertEqual(micOnly.microphone, 1)
+        assertTrue(micOnly.system == nil)
+
+        let dual = LiveMeetingCaptionTrackSet(capturesSystemAudio: true) {
+            created += 1
+            return created
+        }
+        assertEqual(dual.microphone, 2)
+        assertEqual(dual.system, 3, "system audio has its own decoder state")
+    }
+
     await runSuite("An unavailable caption model releases resources from its partial load") {
         let model = CaptionTestRecognizer(failLoad: true)
         let track = LiveMeetingCaptionTrack(recognizer: model)

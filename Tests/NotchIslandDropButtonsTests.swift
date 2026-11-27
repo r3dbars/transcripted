@@ -15,20 +15,61 @@ func testNotchIslandDropButtons() {
         assertNil(buttons[2].countdown)
     }
 
-    runSuite("Stop on a recording is the white primary, not red") {
+    runSuite("The quiet strip: a round Mute icon and the translucent Stop, both on the right") {
         let id = UUID()
         let buttons = NotchIslandDropButtons.buttons(for: .meetingControls(
-            callAudioNote: .off, systemAudioUnverified: false, recordingID: id,
+            callAudioNote: nil, systemAudioUnverified: false, recordingID: id,
             micAction: .meetingMicMute(id)
         ))
-        assertEqual(buttons.map(\.title), ["Turn on", "Mute mic", "Stop"])
-        assertEqual(buttons.map(\.role), [.standard, .standard, .primary], "Stop saves the meeting, so it's safe")
-        assertEqual(buttons.map(\.placement), [.leading, .trailing, .trailing])
+        assertEqual(buttons.map(\.title), ["Mute", "Stop"])
+        assertEqual(buttons.map(\.role), [.standard, .primary], "Stop saves the meeting, so it's safe, never red")
+        assertEqual(buttons.map(\.look), [.icon, .quietPill], "no glaring white Stop block on the recording")
+        assertEqual(buttons.map(\.placement), [.trailing, .trailing])
+        assertEqual(buttons.map(\.symbol), ["mic", "stop.fill"])
+        assertEqual(buttons.first?.toolTip, "Mute microphone", "an icon-only button says what it does on hover")
         assertEqual(buttons.last?.action, .meetingStop(id), "Stop names the recording it was drawn for")
         let unowned = NotchIslandDropButtons.buttons(for: .meetingControls(
             callAudioNote: nil, systemAudioUnverified: false
         ))
         assertEqual(unowned.map(\.title), [], "no recording to name, no Stop to press")
+    }
+
+    runSuite("Live meeting words: Copy and Mute icons on the left, Stop on the right") {
+        let id = UUID()
+        let buttons = NotchIslandDropButtons.buttons(for: .meetingControls(
+            callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true, recordingID: id,
+            micAction: .meetingMicUnmute(id)
+        ))
+        assertEqual(buttons.map(\.action), [.meetingCopyTranscript, .meetingMicUnmute(id), .meetingStop(id)])
+        assertEqual(buttons.map(\.placement), [.leading, .leading, .trailing])
+        assertEqual(buttons.map(\.look), [.icon, .icon, .quietPill])
+        assertEqual(buttons.map(\.toolTip), ["Copy live transcript", "Unmute microphone", nil])
+        assertEqual(buttons[1].symbol, "mic.slash", "a muted mic shows the slashed icon")
+        assertEqual(NotchIslandAction.meetingCopyTranscript.owner, .island, "the island copies the transcript itself")
+        let off = NotchIslandDropButtons.buttons(for: .meetingControls(
+            callAudioNote: nil, systemAudioUnverified: false, showsTranscript: false, recordingID: id
+        ))
+        assertFalse(off.contains { $0.action == .meetingCopyTranscript }, "nothing to copy while live words are off")
+    }
+
+    runSuite("The amber pill shows only when something is wrong") {
+        let id = UUID()
+        func warning(_ note: NotchIslandMeetingContent.CallAudioNote?, unverified: Bool = false,
+                     mic: NotchIslandAction? = nil) -> NotchIslandMeetingWarning? {
+            NotchIslandDropButtons.meetingWarning(for: .meetingControls(
+                callAudioNote: note, systemAudioUnverified: unverified, recordingID: id, micAction: mic
+            ))
+        }
+        assertNil(warning(nil, mic: .meetingMicMute(id)), "all well: no pill and no filler line")
+        assertEqual(warning(.off), NotchIslandMeetingWarning(
+            text: "Call audio is off", action: .meetingCallAudio, toolTip: "Turn on call audio"
+        ), "call audio off: the pill turns it on")
+        assertEqual(warning(.onForNextMeeting)?.text, "Call audio: next meeting")
+        assertNil(warning(.onForNextMeeting)?.action)
+        assertEqual(warning(nil, unverified: true)?.text, "Can't confirm call audio")
+        assertEqual(warning(nil, mic: .meetingMicUnmute(id)), NotchIslandMeetingWarning(text: "Mic muted"))
+        assertEqual(warning(.off, mic: .meetingMicUnmute(id))?.text, "Call audio is off", "call audio trouble wins, one pill at most")
+        assertNil(NotchIslandDropButtons.meetingWarning(for: .meetingSaved(title: nil)), "only a recording has one")
     }
 
     runSuite("The recent take offers Paste again as the primary, on the right like every row") {
@@ -138,6 +179,8 @@ func testNotchIslandDropButtons() {
             .justInserted(text: "Hi", words: 1),
             .meetingControls(callAudioNote: .off, systemAudioUnverified: false, recordingID: id,
                              micAction: .meetingMicMute(id)),
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true,
+                             recordingID: id, micAction: .meetingMicMute(id)),
             .meetingPrompt(warning),
             .meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: 10)),
             .meetingSaved(title: "Weekly sync"),
