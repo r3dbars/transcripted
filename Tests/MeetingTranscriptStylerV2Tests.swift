@@ -471,6 +471,18 @@ private func testV2DeletionIgnoresSymlinkedMetaDirectory() {
     }
     let plan = HomeMeetingDeletion.plan(for: item)
     assertTrue(plan.metadataSidecarURLs.isEmpty, "symlinked .meta directory is never targeted for deletion")
+
+    // Positive check: a real .meta/<capture_id>.json inside the meetings root IS targeted.
+    let cleanRoot = v2TemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: cleanRoot) }
+    let (styledURL, _) = v2Restyle(v2RawTranscript(), in: cleanRoot)
+    if let cleanItem = RecentMeetingsScanner.loadRecent(limit: 5, directory: cleanRoot).first(where: { $0.transcriptURL.lastPathComponent == styledURL.lastPathComponent }) {
+        let cleanPlan = HomeMeetingDeletion.plan(for: cleanItem)
+        assertEqual(cleanPlan.metadataSidecarURLs.count, 1, "real sidecar inside .meta is targeted for deletion")
+        assertEqual(cleanPlan.metadataSidecarURLs.first?.lastPathComponent, "\(v2CaptureID).json")
+    } else {
+        assertTrue(false, "expected scanned meeting item for real .meta sidecar test")
+    }
 }
 
 

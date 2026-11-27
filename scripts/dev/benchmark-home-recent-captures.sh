@@ -20,6 +20,7 @@ swiftc \
   "$ROOT_DIR/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStarFrontmatter.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTitlesDisplay.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingTitlesBody.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptDialogue.swift" \

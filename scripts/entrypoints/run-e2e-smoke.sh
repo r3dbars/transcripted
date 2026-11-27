@@ -37,6 +37,7 @@ SWIFT_SOURCES=(
     "Sources/Support/AutomatedLaunchEnvironment.swift"
     "Sources/App/DebugControlCommand.swift"
     ${SHARED_TEST_STORAGE_SOURCES[@]+"${SHARED_TEST_STORAGE_SOURCES[@]}"}
+    "Sources/Meeting/MeetingTitlesBody.swift"
     "Sources/TranscriptedCore/Models/FailedTranscription.swift"
     "Sources/TranscriptedCore/Models/TranscriptionLanguage.swift"
     "Sources/TranscriptedCore/Services/CoreStoragePaths.swift"
