@@ -64,7 +64,7 @@ struct HomeSettingsPage: View {
     let onLoadMoreMeetings: () -> Void
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
-    let onCollapseMeetingExpansion: () -> Void
+    let onCollapseMeetingExpansion: (String?) -> Void
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
@@ -295,7 +295,7 @@ struct HomeSettingsPage: View {
                     knownPeople: knownPeople,
                     savedSpeakerIDs: savedSpeakerIDs,
                     onToggleExpanded: { onOpenMeeting(meeting) },
-                    onCollapse: onCollapseMeetingExpansion,
+                    onCollapse: { onCollapseMeetingExpansion(meeting.id) },
                     onCopy: { onCopyMeeting(meeting) },
                     onWhoSpoke: { onWhoSpoke(meeting) },
                     makeWhoSpokeSession: { onClose in makeWhoSpokeSession(meeting, onClose) },
@@ -322,7 +322,7 @@ struct HomeSettingsPage: View {
                 clock: clock,
                 escapeClosesCard: !isSearchFocused,
                 onToggleOpen: { onToggleFailedMeeting(failedMeeting) },
-                onCollapse: onCollapseMeetingExpansion
+                onCollapse: { onCollapseMeetingExpansion(MeetingsPageOpenState.failedMeetingKey(failedMeeting.id)) }
             )
         }
     }

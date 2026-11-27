@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// The rail's precision scrubber: a 3 pt track that thickens to 5 pt under
-/// the pointer, a faint ghost from the playhead to the pointer, the played
-/// part in the speaker's color (muted while paused), and a thumb that only
-/// shows on hover or drag. Hovering or dragging floats "14:25 · Priya" over
-/// the pointer: the time there and who is speaking then (just the time at
-/// silence or before the lines load). Clicking or dragging plays from there.
+/// the pointer, a faint ghost fill to the pointer, the played part in the
+/// speaker's color (muted while paused), and a crisp playhead pip that is
+/// subtly visible at rest and blooms to 11 pt on hover or drag. Hovering or
+/// dragging floats "14:25 · Priya" over the pointer using pure coordinate
+/// positioning so changing speaker names never cause layout feedback jitter.
 struct HomeMeetingScrubRail: View {
     let time: TimeInterval
     let total: TimeInterval
@@ -26,64 +26,84 @@ struct HomeMeetingScrubRail: View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 1)
             let fraction = total > 0 ? CGFloat(min(max(time / total, 0), 1)) : 0
+            let thumbX = width * fraction
             let trackHeight: CGFloat = isEngaged ? 5 : 3
+            let thumbSize: CGFloat = isDragging ? 12 : (isEngaged ? 11 : 7)
+
             ZStack(alignment: .leading) {
+                // Background track
                 Capsule()
                     .fill(HomeMeetingCardSurface.railTrack)
                     .frame(height: trackHeight)
-                if let hoverX, !isDragging {
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isEngaged)
+
+                // Hover ghost preview fill
+                if let hoverX, !isDragging, total > 0 {
                     Capsule()
                         .fill(HomeMeetingCardSurface.railGhost)
                         .frame(width: min(max(hoverX, 0), width), height: trackHeight)
                 }
-                Capsule()
-                    .fill(isPlaying || isEngaged ? accent : accent.opacity(0.58))
-                    .frame(width: max(width * fraction, trackHeight), height: trackHeight)
-                    .opacity(fraction > 0 || isEngaged ? 1 : 0)
-                Circle()
-                    .fill(HomeMeetingCardSurface.thumb)
-                    .frame(width: 11, height: 11)
-                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
-                    .overlay {
-                        if isDragging {
-                            Circle()
-                                .strokeBorder(accent.opacity(0.26), lineWidth: 4)
-                                .padding(-4)
+
+                // Played progress fill
+                if total > 0, thumbX > 0.5 {
+                    Capsule()
+                        .fill(isPlaying || isEngaged ? accent : accent.opacity(0.62))
+                        .frame(width: max(thumbX, trackHeight), height: trackHeight)
+                }
+
+                // Playhead pip: always subtly visible when duration is known, blooms on hover/drag
+                if total > 0 {
+                    Circle()
+                        .fill(isEngaged ? HomeMeetingCardSurface.thumb : accent)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .shadow(color: .black.opacity(isEngaged ? 0.38 : 0.18), radius: isEngaged ? 2.5 : 1, y: 1)
+                        .overlay {
+                            if isDragging {
+                                Circle()
+                                    .strokeBorder(accent.opacity(0.28), lineWidth: 3.5)
+                                    .padding(-3.5)
+                            }
                         }
-                    }
-                    .scaleEffect(isDragging ? 1.12 : (isEngaged ? 1 : 0.35))
-                    .opacity(isEngaged ? 1 : 0)
-                    .offset(x: width * fraction - 5.5)
+                        .offset(x: min(max(thumbX - thumbSize / 2, 0), max(0, width - thumbSize)))
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isEngaged)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isDragging)
+                }
             }
-            .frame(maxHeight: .infinity)
-            .overlay(alignment: .topLeading) {
-                if let pointer = isDragging ? width * fraction : hoverX, total > 0 {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if let pointer = isDragging ? thumbX : hoverX, total > 0 {
+                    let clampedX = min(max(pointer, 44), max(44, width - 44))
                     hoverPill(at: pointer, width: width)
+                        .position(x: clampedX, y: -12)
                 }
             }
             .contentShape(Rectangle())
             .onContinuousHover { phase in
                 switch phase {
-                case .active(let location): hoverX = location.x
-                case .ended: hoverX = nil
+                case .active(let location):
+                    hoverX = min(max(location.x, 0), width)
+                case .ended:
+                    hoverX = nil
                 }
             }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { value in
+                        guard total > 0 else { return }
                         isDragging = true
-                        onDrag(Double(min(max(value.location.x / width, 0), 1)))
+                        let frac = Double(min(max(value.location.x / width, 0), 1))
+                        onDrag(frac)
                     }
                     .onEnded { value in
                         isDragging = false
-                        onCommit(Double(min(max(value.location.x / width, 0), 1)))
+                        guard total > 0 else { return }
+                        let frac = Double(min(max(value.location.x / width, 0), 1))
+                        onCommit(frac)
                     }
             )
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.13), value: isEngaged)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isDragging)
         }
         .frame(minWidth: 90)
-        .frame(height: 26)
+        .frame(height: 28)
         .accessibilityElement()
         .accessibilityLabel(Text("Playback position"))
         .accessibilityValue(Text(
@@ -129,122 +149,9 @@ struct HomeMeetingScrubRail: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.45), radius: 9, y: 4)
+        .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
         .fixedSize()
-        .alignmentGuide(.leading) { dimensions in dimensions.width / 2 - x }
-        .alignmentGuide(.top) { dimensions in dimensions.height + 6 }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-}
-
-/// The synced mini transcript under the rail: the line being spoken, crisp,
-/// with a bar in the speaker's color, the lines around it dimmed, and a soft
-/// fade at the top and bottom. It scrolls with playback and with a drag on
-/// the rail; clicking a line plays from it.
-struct HomeMeetingMiniTranscript: View {
-    let timed: HomeMeetingTimedLines
-    let time: TimeInterval
-    let onJump: (TimeInterval) -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    static let viewportHeight: CGFloat = 96
-    static let lineHeight: CGFloat = 32
-
-    var body: some View {
-        let active = timed.activeIndex(at: time)
-        let window = HomeMeetingRailPresentation.miniTranscriptWindow(active: active, count: timed.lines.count)
-        let center = active ?? -1
-        ZStack(alignment: .top) {
-            ForEach(Array(window), id: \.self) { index in
-                HomeMeetingMiniTranscriptLine(
-                    line: timed.lines[index],
-                    isActive: index == active,
-                    onJump: timed.starts[index].map { start in { onJump(start) } }
-                )
-                .offset(y: Self.viewportHeight / 2 + (CGFloat(index - center) - 0.5) * Self.lineHeight)
-                .transition(.opacity)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: Self.viewportHeight, maxHeight: Self.viewportHeight, alignment: .top)
-        .clipped()
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .black.opacity(0.45), location: 0.18),
-                    .init(color: .black, location: 0.36),
-                    .init(color: .black, location: 0.66),
-                    .init(color: .black.opacity(0.4), location: 0.86),
-                    .init(color: .clear, location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.9), value: active)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(LibraryTokens.hairline)
-                .frame(height: 1)
-        }
-        .padding(.horizontal, 8)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Now playing"))
-        .accessibilityIdentifier("transcripted.home.meeting.mini-transcript")
-    }
-}
-
-private struct HomeMeetingMiniTranscriptLine: View {
-    let line: HomeMeetingTranscriptLine
-    let isActive: Bool
-    let onJump: (() -> Void)?
-
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(HomeMeetingRailInk.accent(for: line))
-                .frame(width: 2, height: 14)
-                .opacity(isActive ? 1 : 0)
-            if !line.speaker.isEmpty {
-                Text(line.speaker)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(HomeMeetingRailInk.text(for: line))
-                    .lineLimit(1)
-                    .frame(minWidth: 48, alignment: .leading)
-                    .fixedSize()
-            }
-            Text(line.text)
-                .font(.system(size: 12))
-                .foregroundStyle(LibraryTokens.ink)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let start = line.startSeconds {
-                Text(MeetingAudioPlayback.clockText(start))
-                    .font(.system(size: 10.5))
-                    .monospacedDigit()
-                    .foregroundStyle(LibraryTokens.ink3)
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(height: HomeMeetingMiniTranscript.lineHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isHovering && onJump != nil ? DesignTokens.fill : Color.clear)
-        )
-        .opacity(isActive ? 1 : (isHovering ? 0.72 : 0.34))
-        .scaleEffect(isActive ? 1 : 0.99, anchor: .leading)
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .onTapGesture { onJump?() }
-        .animation(.easeOut(duration: 0.24), value: isActive)
-        .help(onJump == nil ? "" : "Play from here")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(onJump == nil ? [] : .isButton)
-        .accessibilityAction { onJump?() }
     }
 }

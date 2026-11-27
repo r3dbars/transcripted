@@ -332,7 +332,11 @@ extension TranscriptedSettingsView {
             onCopyMeeting: { meeting in
                 handleCopyMeeting(meeting)
             },
-            onCollapseMeetingExpansion: {
+            onCollapseMeetingExpansion: { targetID in
+                if let targetID {
+                    guard homeMeetingOpenState.isOpen(targetID, expandedID: homeExpandedMeetingID)
+                        || homeExpandedMeetingID == targetID else { return }
+                }
                 collapseHomeMeetingExpansion()
             },
             knownPeople: homeKnownPeopleOptions,

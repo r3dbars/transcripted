@@ -52,9 +52,10 @@ final class NotchIslandLiveTranscriptView: NSView {
         style.paragraphSpacing = 3
         return style
     }()
-    /// How far down the top fade reaches.
-    private static let fadeHeight: CGFloat = 44
+    /// How far down the top fade reaches once older words scroll past the top.
+    private static let fadeHeight: CGFloat = 22
     private let fadeMask = CAGradientLayer()
+    private var clipBoundsObserver: NSObjectProtocol?
 
     init(width: CGFloat) {
         let size = NSSize(width: width, height: Self.height)
@@ -93,18 +94,37 @@ final class NotchIslandLiveTranscriptView: NSView {
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
 
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        clipBoundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateFade() }
+        }
+
         placeholder.frame = NSRect(x: 0, y: Self.height - 40, width: width, height: 34)
         placeholder.autoresizingMask = [.minYMargin]
         addSubview(placeholder)
 
-        // Apple Music lyrics style: the top of the scroll fades to clear.
+        // Apple Music lyrics style: gentle top fade only once older words scroll off the top.
         wantsLayer = true
-        fadeMask.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor]
+        fadeMask.colors = [
+            NSColor(white: 0, alpha: 0.22).cgColor,
+            NSColor.black.cgColor,
+            NSColor.black.cgColor,
+        ]
         fadeMask.startPoint = CGPoint(x: 0.5, y: 1) // layer y-up: top
         fadeMask.endPoint = CGPoint(x: 0.5, y: 0)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Live transcript")
+    }
+
+    deinit {
+        if let clipBoundsObserver {
+            NotificationCenter.default.removeObserver(clipBoundsObserver)
+        }
     }
 
     @available(*, unavailable)
@@ -113,16 +133,20 @@ final class NotchIslandLiveTranscriptView: NSView {
     override func layout() {
         super.layout()
         fadeMask.frame = bounds
-        let fade = NSNumber(value: Double(min(0.5, Self.fadeHeight / max(1, bounds.height))))
+        let fade = NSNumber(value: Double(min(0.25, Self.fadeHeight / max(1, bounds.height))))
         fadeMask.locations = [0, fade, 1]
+        updateFade()
     }
 
-    /// The fade only shows once words reach the top, so a short transcript
-    /// and the placeholder stay crisp.
+    /// The fade only shows once older words have actually scrolled past the
+    /// top edge, so the beginning of a meeting is always 100% crisp.
     private func updateFade() {
-        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
-        let overflows = textView.frame.height > bounds.height - 4
-        let mask: CALayer? = overflows ? fadeMask : nil
+        guard let container = textView.textContainer, let layoutManager = textView.layoutManager else { return }
+        layoutManager.ensureLayout(for: container)
+        let usedHeight = layoutManager.usedRect(for: container).height
+        let scrolledPastTop = scrollView.contentView.documentVisibleRect.minY > 2
+        let shouldFade = usedHeight > bounds.height - 2 && scrolledPastTop
+        let mask: CALayer? = shouldFade ? fadeMask : nil
         if layer?.mask !== mask { layer?.mask = mask }
     }
 
@@ -220,6 +244,7 @@ final class NotchIslandLiveTranscriptView: NSView {
     func scrollToNewest() {
         textView.layoutManager?.ensureLayout(for: textView.textContainer!)
         textView.scrollToEndOfDocument(nil)
+        updateFade()
     }
 
     private var isScrolledToBottom: Bool {

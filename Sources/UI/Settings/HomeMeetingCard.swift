@@ -184,6 +184,7 @@ struct QuietMeetingCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
     @State private var whoSpokeSession: HomeMeetingWhoSpokeSession?
+    @State private var scrubTime: TimeInterval?
 
     private typealias P = HomeMeetingCardPresentation
     private typealias R = HomeMeetingRailPresentation
@@ -228,11 +229,15 @@ struct QuietMeetingCard: View {
         }
         .modifier(HomeMeetingRowSurface(isOpen: isExpanded, isHovering: isHovering, horizontalPadding: 0))
         .onHover { isHovering = $0 }
-        // Swallow taps inside the card so the page's click-away collapse
-        // doesn't fire for clicks on the card's own quiet areas.
-        .onTapGesture {}
         .background {
             if isExpanded {
+                // Zero-hit-test local click monitor: collapses this card on any
+                // click outside its bounds (margins, right gutter, below the
+                // list, day headers) without competing with buttons inside it.
+                HomeMeetingOutsideClickMonitor(
+                    isActive: isExpanded && whoSpokeSession == nil,
+                    onOutsideClick: onCollapse
+                )
                 // Hidden control so Esc collapses the opened card. Off while
                 // search has focus, where Esc clears the search first.
                 Button(action: onCollapse) { EmptyView() }
@@ -405,7 +410,8 @@ struct QuietMeetingCard: View {
                 HomeMeetingInstrumentShell(
                     audio: audio,
                     fallbackDuration: P.durationSeconds(start: item.startDate, end: item.endDate),
-                    timed: timedLines
+                    timed: timedLines,
+                    scrubTime: $scrubTime
                 )
                 .padding(.top, 13)
             }
@@ -425,6 +431,7 @@ struct QuietMeetingCard: View {
                 showsAllLines: showsAllLines,
                 knownPeople: knownPeople,
                 savedSpeakerIDs: savedSpeakerIDs,
+                scrubTime: scrubTime,
                 onToggle: onToggleTranscript,
                 onShowAll: onShowAllLines,
                 onAssignSpeakers: onAssignSpeakers

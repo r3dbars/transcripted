@@ -25,12 +25,16 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     @Published private(set) var activeAttachmentID: String?
     @Published private(set) var isPlaying = false
     @Published private(set) var isPaused = false
+    @Published private(set) var isLoading = false
     @Published private(set) var unavailablePlaybackID: String?
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var activeChoiceID: String?
     /// The speed every meeting plays at, kept across meetings while the app runs.
     @Published private(set) var playbackRate: Float = 1
+    /// Real file durations probed off the main actor for meetings whose
+    /// frontmatter didn't record an end time.
+    @Published private(set) var probedDurations: [String: TimeInterval] = [:]
     /// Source stem ("microphone", "system_audio", ...) picked in the player,
     /// so a transcript timestamp click starts the same source the menu shows.
     /// Keyed by the meeting's audio folder, not the file paths, so a pick
@@ -44,21 +48,30 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     private var loadGeneration = 0
     /// The meeting whose files are opening right now, if any.
     private var loadingAttachmentID: String?
+    /// Latest requested playhead and pause state while an async file open is in
+    /// flight, so scrubbing or pausing mid-load never snaps back.
+    private var pendingStartTime: TimeInterval = 0
+    private var pendingStartPaused = false
+    /// Avoids reading stale or pre-roll AVAudioPlayer.currentTime during the
+    /// 30ms multi-track synchronized start window right after a seek.
+    private var seekSettleDeadline: TimeInterval = 0
+    private var probingAttachmentIDs: Set<String> = []
 
     func toggle(_ attachment: MeetingAudioAttachment, choice: MeetingAudioPlaybackChoice? = nil) {
-        let choiceID = (choice ?? attachment.defaultPlaybackChoice)?.id
-        if activeAttachmentID == attachment.id && activeChoiceID == choiceID {
+        let choiceID = (choice ?? preferredChoice(for: attachment))?.id
+        let matchesChoice = choice == nil || activeChoiceID == nil || activeChoiceID == choiceID
+        if activeAttachmentID == attachment.id && matchesChoice {
             if isPlaying {
                 pause()
             } else if isPaused {
                 resume()
             } else {
-                play(attachment, choice: choice)
+                play(attachment, choice: choice ?? preferredChoice(for: attachment))
             }
             return
         }
 
-        play(attachment, choice: choice)
+        play(attachment, choice: choice ?? preferredChoice(for: attachment))
     }
 
     func play(_ attachment: MeetingAudioAttachment, choice: MeetingAudioPlaybackChoice? = nil) {
@@ -74,9 +87,44 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         play(
             attachment,
             choice: choice,
-            startTime: livePlayerTime() ?? currentTime,
+            startTime: currentPlaybackTime(for: attachment),
             startPaused: isPaused
         )
+    }
+
+    /// Best known length for a meeting's audio, falling back from active player
+    /// duration -> probed file duration -> frontmatter span -> nil.
+    func knownDuration(for attachment: MeetingAudioAttachment, fallback: TimeInterval?) -> TimeInterval {
+        if isActive(attachment), duration > 0 { return duration }
+        if let probed = probedDurations[attachment.id], probed > 0 { return probed }
+        if let fallback, fallback > 0 { return fallback }
+        return 0
+    }
+
+    /// Reads the file's real length once off the main actor so meetings without
+    /// a saved end timestamp still show their playhead, clock and hover pill.
+    func probeDurationIfNeeded(for attachment: MeetingAudioAttachment) {
+        if isActive(attachment), duration > 0 { return }
+        if let probed = probedDurations[attachment.id], probed > 0 { return }
+        guard probingAttachmentIDs.insert(attachment.id).inserted else { return }
+        let choice = preferredChoice(for: attachment) ?? attachment.defaultPlaybackChoice
+        let urls = choice?.urls ?? []
+        guard !urls.isEmpty else {
+            probingAttachmentIDs.remove(attachment.id)
+            return
+        }
+        let attachmentID = attachment.id
+        Task { @MainActor [weak self] in
+            let measured = await Self.measureDuration(for: urls)
+            guard let self else { return }
+            self.probingAttachmentIDs.remove(attachmentID)
+            if let measured, measured > 0 {
+                self.probedDurations[attachmentID] = measured
+                if self.activeAttachmentID == attachmentID, self.duration <= 0 {
+                    self.duration = measured
+                }
+            }
+        }
     }
 
     private func play(
@@ -86,15 +134,34 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         startPaused: Bool,
         rejectsStartPastEnd: Bool = false
     ) {
-        let requestedChoice = choice ?? attachment.defaultPlaybackChoice
+        let requestedChoice = choice ?? preferredChoice(for: attachment) ?? attachment.defaultPlaybackChoice
         let candidates = MeetingAudioPlaybackLoadingPolicy.choices(for: attachment, preferredChoice: requestedChoice)
         loadGeneration &+= 1
         let generation = loadGeneration
+
+        // Update state optimistically on the main actor so Play/Pause and the
+        // playhead reflect the user's click immediately with zero snap-back.
+        stopProgressTimer()
+        releasePlayers()
         loadingAttachmentID = attachment.id
+        isLoading = true
+        unavailablePlaybackID = nil
+        activeAttachmentID = attachment.id
+        activeChoiceID = requestedChoice?.id
+        let clampedStart = max(startTime, 0)
+        pendingStartTime = clampedStart
+        pendingStartPaused = startPaused
+        let known = probedDurations[attachment.id] ?? 0
+        duration = known > 0 ? known : max(duration, clampedStart)
+        currentTime = known > 0 ? min(clampedStart, known) : clampedStart
+        isPlaying = !startPaused
+        isPaused = startPaused
+
         Task { @MainActor [weak self] in
             let loaded = await Self.openPlayers(for: candidates.map(\.urls))
             guard let self, generation == self.loadGeneration else { return }
             self.loadingAttachmentID = nil
+            self.isLoading = false
             guard let loaded, candidates.indices.contains(loaded.index) else {
                 self.stop()
                 self.unavailablePlaybackID = self.playbackID(for: attachment, choice: requestedChoice)
@@ -105,8 +172,8 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
                 loaded.box.players,
                 attachment: attachment,
                 choice: candidates[loaded.index],
-                startTime: startTime,
-                startPaused: startPaused,
+                startTime: self.pendingStartTime,
+                startPaused: self.pendingStartPaused,
                 rejectsStartPastEnd: rejectsStartPastEnd
             )
         }
@@ -120,11 +187,15 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         startPaused: Bool,
         rejectsStartPastEnd: Bool
     ) {
+        let loadedDuration = loadedPlayers.map(\.duration).max() ?? 0
+        if loadedDuration > 0 {
+            probedDurations[attachment.id] = loadedDuration
+        }
         // A transcript time can sit past the end of a shorter source (Mic vs
         // System). Starting there would finish instantly and reset the player,
         // so leave whatever is playing alone and just beep.
-        let loadedDuration = loadedPlayers.map(\.duration).max() ?? 0
         if rejectsStartPastEnd, startTime > 0, startTime >= loadedDuration {
+            stop()
             NSSound.beep()
             return
         }
@@ -136,7 +207,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         activeChoiceID = choice.id
         players = loadedPlayers
         duration = loadedDuration
-        currentTime = min(max(startTime, 0), duration)
+        currentTime = min(max(startTime, 0), loadedDuration)
         isPlaying = !startPaused
         isPaused = startPaused
 
@@ -150,13 +221,23 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         if startPaused {
             stopProgressTimer()
         } else {
-            startPlayersTogether()
-            startProgressTimer()
+            let started = startPlayersTogether()
+            isPlaying = started
+            isPaused = !started
+            if started {
+                startProgressTimer()
+            }
         }
     }
 
     func pause() {
         guard isPlaying else { return }
+        if isLoading {
+            pendingStartPaused = true
+            isPlaying = false
+            isPaused = true
+            return
+        }
         currentTime = livePlayerTime() ?? currentTime
         for player in players {
             player.pause()
@@ -167,7 +248,14 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     }
 
     func resume() {
-        guard isPaused, !players.isEmpty else { return }
+        guard isPaused else { return }
+        if isLoading {
+            pendingStartPaused = false
+            isPlaying = true
+            isPaused = false
+            return
+        }
+        guard !players.isEmpty else { return }
         // A track that already ran out stays quiet; the others pick up where
         // the playhead is.
         let resumed = startPlayersTogether()
@@ -181,6 +269,10 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     func stop() {
         loadGeneration &+= 1
         loadingAttachmentID = nil
+        isLoading = false
+        pendingStartTime = 0
+        pendingStartPaused = false
+        seekSettleDeadline = 0
         stopProgressTimer()
         releasePlayers()
         activeAttachmentID = nil
@@ -237,16 +329,22 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     }
 
     func seek(_ attachment: MeetingAudioAttachment, progress: Double) {
-        guard isActive(attachment), duration > 0 else { return }
+        guard isActive(attachment) else { return }
+        let effectiveDuration = knownDuration(for: attachment, fallback: duration)
+        guard effectiveDuration > 0 else { return }
         let clampedProgress = min(max(progress, 0), 1)
-        let targetTime = duration * clampedProgress
+        let targetTime = effectiveDuration * clampedProgress
+        currentTime = targetTime
+        if isLoading {
+            pendingStartTime = targetTime
+            return
+        }
 
         let wasPlaying = isPlaying
         for player in players {
             player.pause()
             player.currentTime = min(targetTime, max(player.duration, 0))
         }
-        currentTime = targetTime
         if wasPlaying {
             startPlayersTogether()
         }
@@ -263,6 +361,16 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         from time: TimeInterval,
         rowSourceStem: String? = nil
     ) {
+        if isActive(attachment), isLoading {
+            let clamped = max(time, 0)
+            pendingStartTime = clamped
+            pendingStartPaused = false
+            currentTime = clamped
+            isPlaying = true
+            isPaused = false
+            return
+        }
+
         guard isActive(attachment), duration > 0 else {
             play(
                 attachment,
@@ -287,10 +395,12 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     }
 
     func skip(_ attachment: MeetingAudioAttachment, by seconds: TimeInterval) {
-        guard isActive(attachment), duration > 0 else { return }
-        let now = livePlayerTime() ?? currentTime
-        let targetTime = min(max(now + seconds, 0), duration)
-        seek(attachment, progress: targetTime / duration)
+        guard isActive(attachment) else { return }
+        let effectiveDuration = knownDuration(for: attachment, fallback: duration)
+        guard effectiveDuration > 0 else { return }
+        let now = isLoading ? pendingStartTime : (livePlayerTime() ?? currentTime)
+        let targetTime = min(max(now + seconds, 0), effectiveDuration)
+        seek(attachment, progress: targetTime / effectiveDuration)
     }
 
     func progress(for attachment: MeetingAudioAttachment) -> Double {
@@ -304,6 +414,9 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     /// meeting (or nothing) is loaded.
     func currentPlaybackTime(for attachment: MeetingAudioAttachment) -> TimeInterval {
         guard isActive(attachment) else { return 0 }
+        if isLoading || ProcessInfo.processInfo.systemUptime < seekSettleDeadline {
+            return currentTime
+        }
         guard isPlaying, let live = livePlayerTime() else { return currentTime }
         return live
     }
@@ -382,9 +495,11 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
         let playable = players.filter { $0.currentTime < $0.duration }
         guard let anchor = playable.first else { return false }
         if playable.count == 1 {
+            seekSettleDeadline = 0
             return anchor.play()
         }
         let startAt = anchor.deviceCurrentTime + 0.03
+        seekSettleDeadline = ProcessInfo.processInfo.systemUptime + 0.06
         var started = false
         for player in playable {
             started = player.play(atTime: startAt) || started
@@ -403,8 +518,26 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, AVAudioPlayerDeleg
     /// The furthest track's position, or nil with nothing loaded.
     private func livePlayerTime() -> TimeInterval? {
         guard !players.isEmpty, duration > 0 else { return nil }
+        if ProcessInfo.processInfo.systemUptime < seekSettleDeadline {
+            return currentTime
+        }
         let latest = players.map(\.currentTime).max() ?? 0
         return min(max(latest, 0), duration)
+    }
+
+    /// Measures audio file length off the main actor using `AVAudioFile`.
+    private nonisolated static func measureDuration(for urls: [URL]) async -> TimeInterval? {
+        await Task.detached(priority: .utility) { () -> TimeInterval? in
+            var maxDuration: TimeInterval = 0
+            for url in urls {
+                let playable = MeetingAudioPlaybackLoadingPolicy.playableURL(for: url)
+                if let file = try? AVAudioFile(forReading: playable), file.processingFormat.sampleRate > 0 {
+                    let secs = Double(file.length) / file.processingFormat.sampleRate
+                    if secs > maxDuration { maxDuration = secs }
+                }
+            }
+            return maxDuration > 0 ? maxDuration : nil
+        }.value
     }
 
     /// Opens the first candidate whose files all open, off the main actor.

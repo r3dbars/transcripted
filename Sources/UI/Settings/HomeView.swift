@@ -372,9 +372,12 @@ struct HomeFailedMeetingInlineRow: View {
             }
         }
         .homeMeetingRowSurface(isOpen: isOpen)
-        .onTapGesture {}
         .background {
             if isOpen {
+                HomeMeetingOutsideClickMonitor(
+                    isActive: isOpen,
+                    onOutsideClick: onCollapse
+                )
                 Button(action: onCollapse) { EmptyView() }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.cancelAction)

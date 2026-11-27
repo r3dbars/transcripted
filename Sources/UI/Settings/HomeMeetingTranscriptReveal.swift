@@ -1,161 +1,229 @@
 import SwiftUI
 import TranscriptedCore
 
-// The opened Meetings card's last row, under the player: "› Full transcript
-// · 214 lines". It is closed every time the card opens
-// (`MeetingsPageOpenState`), so the lines are only laid out once asked for.
-// Revealed, each line is the speaker's name in bold, then the words, upright
-// and always selectable. Hovering a line shows "▶ 0:42" at its end and
-// clicking that plays the kept audio from there; rows never follow the
-// playhead. The name is still the one-voice fix (`QuietMeetingSpeakerLabel`).
-// After 60 lines, "Show all N lines".
+// Unified expandable, auto-following transcript for an opened Meetings card
+// (owner-approved 2026-11-27): sits directly below the milled playback bar as a
+// compact scrollable transcript window (~156 pt) with an "Expand transcript"
+// button at the bottom that smoothly grows the same scrollable view (~420 pt)
+// to read and scroll through the entire meeting.
+//
+// While audio plays (or while scrubbing the rail), the active spoken line is
+// highlighted with a vertical VoicePrint bar and the scroll view smoothly
+// follows along whenever the spoken line advances. Clicking any line's
+// timestamp plays from there, and clicking a speaker name opens the inline
+// one-voice fix (`QuietMeetingSpeakerLabel`).
 
 struct HomeMeetingTranscriptReveal: View {
     let item: RecentMeetingItem
     /// The read transcript, or nil while it loads (or when the read failed).
     let content: HomeMeetingPreviewContent?
     let isLoading: Bool
+    /// False = compact scrollable viewport (~156 pt); true = tall expanded viewport (~420 pt).
     let isShown: Bool
     let showsAllLines: Bool
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
+    /// Live drag time while scrubbing the rail above, or nil when not scrubbing.
+    var scrubTime: TimeInterval? = nil
     let onToggle: () -> Void
     let onShowAll: () -> Void
     let onAssignSpeakers: ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
 
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
+    @State private var isExpandHovered = false
 
     private typealias P = HomeMeetingCardPresentation
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            revealRow
-            if isShown {
-                lines
-                    .padding(.bottom, 12)
-                    .transition(.opacity)
-            }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isShown)
+    private static let compactHeight: CGFloat = 156
+    private static let expandedHeight: CGFloat = 420
+    private static let compactLineThreshold = 4
+
+    private var isAudioActiveHere: Bool {
+        guard let audio = item.audio else { return false }
+        return playback.isActive(audio)
     }
 
-    private var revealRow: some View {
-        Button {
-            onToggle()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8.5, weight: .semibold))
-                    .rotationEffect(.degrees(isShown ? 90 : 0))
-                    .frame(width: 10)
-                Text(P.revealTitle(isShown: isShown))
-                    .fontWeight(.medium)
-                if let count = P.lineCountText(content?.transcriptLines.count) {
-                    Text("\u{00B7} \(count)")
-                        .monospacedDigit()
-                        .foregroundStyle(LibraryTokens.ink3)
-                } else if isLoading {
-                    ProgressView().controlSize(.mini)
-                }
-                Spacer(minLength: 8)
-            }
-            .font(LibraryTokens.meta)
-            .foregroundStyle(isHovering ? LibraryTokens.ink : LibraryTokens.ink2)
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .overlay(alignment: .top) {
+    private var isPlayingHere: Bool {
+        isAudioActiveHere && playback.isPlaying
+    }
+
+    private var followTime: TimeInterval? {
+        if let scrubTime { return scrubTime }
+        guard isAudioActiveHere else { return nil }
+        return playback.currentTime
+    }
+
+    private var timedLines: HomeMeetingTimedLines {
+        content.map { HomeMeetingTimedLines($0.transcriptLines) } ?? .empty
+    }
+
+    private var activeLineIndex: Int? {
+        guard let followTime else { return nil }
+        return timedLines.activeIndex(at: followTime)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
             Rectangle()
                 .fill(LibraryTokens.hairline)
                 .frame(height: 1)
-        }
-        .padding(.top, 12)
-        // Looks like the mockup's reveal row; reads as a disclosure.
-        .accessibilityRepresentation {
-            DisclosureGroup(isExpanded: Binding(get: { isShown }, set: { if $0 != isShown { onToggle() } })) {
-                EmptyView()
-            } label: {
-                Text(revealAccessibilityLabel)
-            }
-        }
-        .accessibilityIdentifier("transcripted.home.meeting.show-more")
-    }
+                .padding(.top, 12)
 
-    /// "Full transcript, 214 lines".
-    private var revealAccessibilityLabel: String {
-        [P.revealTitle(isShown: isShown), P.lineCountText(content?.transcriptLines.count)].compactMap { $0 }.joined(separator: ", ")
+            transcriptBody
+                .padding(.top, 8)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.88), value: isShown)
     }
 
     @ViewBuilder
-    private var lines: some View {
+    private var transcriptBody: some View {
         if let content {
             if content.transcriptLines.isEmpty {
-                // Old or hand-edited transcripts with no speaker lines.
-                Text(content.fallbackText)
-                    .font(LibraryTokens.body)
-                    .foregroundStyle(LibraryTokens.ink)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                let text = content.fallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    ScrollView {
+                        Text(text)
+                            .font(LibraryTokens.body)
+                            .foregroundStyle(LibraryTokens.ink)
+                            .lineSpacing(3)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(maxHeight: isShown ? Self.expandedHeight : Self.compactHeight)
+                    expandFooter(lineCount: nil)
+                }
             } else {
                 let all = content.transcriptLines
-                let shown = P.shownLineCount(total: all.count, showsAll: showsAllLines)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(0..<shown, id: \.self) { index in
-                        let line = all[index]
-                        HomeMeetingTranscriptLineRow(
-                            line: line,
-                            index: index,
-                            audio: item.audio,
-                            knownPeople: knownPeople,
-                            isSavedPerson: line.identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false,
-                            onAssign: { assignment, completion in
-                                onAssignSpeakers([assignment], completion)
+                let needsExpand = all.count > Self.compactLineThreshold
+                let targetHeight: CGFloat? = needsExpand
+                    ? (isShown ? Self.expandedHeight : Self.compactHeight)
+                    : nil
+
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(all.indices, id: \.self) { index in
+                                let line = all[index]
+                                let isActiveLine = index == activeLineIndex
+                                HomeMeetingTranscriptLineRow(
+                                    line: line,
+                                    index: index,
+                                    audio: item.audio,
+                                    isActive: isActiveLine,
+                                    knownPeople: knownPeople,
+                                    isSavedPerson: line.identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false,
+                                    onAssign: { assignment, completion in
+                                        onAssignSpeakers([assignment], completion)
+                                    }
+                                )
+                                .id(index)
                             }
-                        )
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.trailing, 4)
                     }
-                    if let showAll = showsAllLines ? nil : P.showAllTitle(totalLineCount: all.count) {
-                        Button(showAll, action: onShowAll)
-                            .buttonStyle(.plain)
-                            .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .padding(.top, 8)
-                            .accessibilityIdentifier("transcripted.home.expansion.show-all")
+                    .frame(height: targetHeight)
+                    .overlay(alignment: .bottom) {
+                        if needsExpand && !isShown {
+                            LinearGradient(
+                                colors: [Color.clear, HomeMeetingCardSurface.liftedFill.opacity(0.92)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 26)
+                            .allowsHitTesting(false)
+                        }
                     }
+                    .onChange(of: activeLineIndex) { _, newIndex in
+                        guard let newIndex, isPlayingHere || scrubTime != nil else { return }
+                        scroll(proxy, to: newIndex)
+                    }
+                    .onChange(of: isPlayingHere) { _, playing in
+                        guard playing, let current = activeLineIndex else { return }
+                        scroll(proxy, to: current)
+                    }
+                }
+
+                if needsExpand {
+                    expandFooter(lineCount: all.count)
                 }
             }
         } else if isLoading {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
-                Text("Loading\u{2026}")
+                Text("Loading transcript\u{2026}")
             }
             .font(LibraryTokens.meta)
             .foregroundStyle(LibraryTokens.ink3)
+            .padding(.vertical, 10)
         }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to index: Int) {
+        if reduceMotion || scrubTime != nil {
+            proxy.scrollTo(index, anchor: .center)
+        } else {
+            withAnimation(.easeOut(duration: 0.28)) {
+                proxy.scrollTo(index, anchor: .center)
+            }
+        }
+    }
+
+    private func expandFooter(lineCount: Int?) -> some View {
+        let countText = P.lineCountText(lineCount)
+        return Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: isShown ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                Text(isShown ? "Show less" : "Expand transcript")
+                    .fontWeight(.medium)
+                if let countText {
+                    Text("\u{00B7}")
+                        .foregroundStyle(LibraryTokens.ink3)
+                    Text(countText)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                }
+            }
+            .font(LibraryTokens.meta)
+            .foregroundStyle(isExpandHovered ? LibraryTokens.ink : LibraryTokens.ink2)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isExpandHovered ? DesignTokens.fill : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isExpandHovered = $0 }
+        .padding(.top, 4)
+        .accessibilityLabel(Text(isShown ? "Collapse transcript" : "Expand transcript"))
+        .accessibilityIdentifier("transcripted.home.meeting.show-more")
     }
 }
 
 // MARK: - Transcript line
 
-/// One "Name words" line. The words are always selectable. With kept audio,
-/// hovering shows "▶ 0:42" at the end, in a slot the line always leaves
-/// free so hovering never rewraps the text, and only that plays from there.
+/// One speaker + text + timestamp line inside the unified transcript view.
+/// Highlights cleanly with the speaker's VoicePrint accent bar when active,
+/// supports inline speaker renaming, text selection, and clicking to play from
+/// that line's timestamp.
 private struct HomeMeetingTranscriptLineRow: View {
     let line: HomeMeetingTranscriptLine
     let index: Int
     let audio: MeetingAudioAttachment?
+    let isActive: Bool
     let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
     @State private var isHovering = false
 
-    /// The name column and the "▶ 1:02:03" slot.
-    static let nameColumnWidth: CGFloat = 64
+    static let nameColumnWidth: CGFloat = 68
     static let timeSlotWidth: CGFloat = 52
 
     private var playableStart: TimeInterval? {
@@ -168,7 +236,13 @@ private struct HomeMeetingTranscriptLineRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(HomeMeetingRailInk.accent(for: line))
+                .frame(width: 2, height: 15)
+                .padding(.top, 2)
+                .opacity(isActive ? 1 : 0)
+
             if !line.speaker.isEmpty {
                 QuietMeetingSpeakerLabel(
                     identity: line.identity,
@@ -179,45 +253,47 @@ private struct HomeMeetingTranscriptLineRow: View {
                     onAssign: onAssign
                 )
             }
+
             Text(line.text)
                 .font(LibraryTokens.body)
-                .foregroundStyle(LibraryTokens.ink)
+                .foregroundStyle(isActive ? LibraryTokens.ink : LibraryTokens.ink.opacity(0.86))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
+
             if let clock, let start = playableStart {
                 Button {
                     play(from: start)
                 } label: {
-                    Text("\u{25B6}\u{FE0E} \(clock)")
+                    Text(isHovering ? "\u{25B6}\u{FE0E} \(clock)" : clock)
                         .font(TextRole.small.font())
                         .monospacedDigit()
-                        .foregroundStyle(LibraryTokens.ink3)
+                        .foregroundStyle(isActive ? HomeMeetingRailInk.accent(for: line) : LibraryTokens.ink3)
                         .frame(width: Self.timeSlotWidth, alignment: .trailing)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)
-                .opacity(isHovering ? 1 : 0)
-                .allowsHitTesting(isHovering)
+                .opacity(isHovering || isActive ? 1 : 0)
+                .allowsHitTesting(isHovering || isActive)
                 .help("Play from \(clock)")
-                // The line's own action says the same for VoiceOver.
                 .accessibilityHidden(true)
                 .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .padding(.horizontal, 6)
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                .fill(isHovering && playableStart != nil ? DesignTokens.fillStrong : Color.clear)
+                .fill(
+                    isActive
+                        ? DesignTokens.fillStrong
+                        : (isHovering && playableStart != nil ? DesignTokens.fill : Color.clear)
+                )
         )
-        .padding(.horizontal, -6)
         .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.1)) { isHovering = hovering }
-        }
+        .onHover { isHovering = $0 }
         .modifier(LinePlayAccessibilityAction(clock: clock) {
             if let start = playableStart { play(from: start) }
         })
@@ -232,7 +308,6 @@ private struct HomeMeetingTranscriptLineRow: View {
         )
     }
 
-    /// Retained-audio file stem that holds a channel's speech.
     private static func retainedAudioStem(for channel: HomeMeetingSpeakerChannel) -> String {
         switch channel {
         case .mic: return "microphone"
@@ -241,7 +316,6 @@ private struct HomeMeetingTranscriptLineRow: View {
     }
 }
 
-/// VoiceOver can play from a line without hovering it.
 private struct LinePlayAccessibilityAction: ViewModifier {
     let clock: String?
     let action: () -> Void
