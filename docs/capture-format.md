@@ -18,11 +18,15 @@ change.
 
 Two flat frontmatter keys carry the contract:
 
-- `format_version: 1` — the capture-format version. **Absent means the file
-  predates versioning; parse it exactly like version 1.** The grammar below has
-  not changed since before the key existed — the key was added so future
-  breaking changes have somewhere to land. Bump the number only for a breaking
-  change; additive changes stay within the current version.
+- `format_version` — the capture-format version. **Absent means the file
+  predates versioning; parse it exactly like version 1.** Raw meetings,
+  dictation and writing day files are version 1. Since 2026-11-27 the meeting
+  restyle writes **version 2**: compact frontmatter (pipeline keys move to a
+  hidden sidecar), merged turns as `[MM:SS] **Speaker:** text`, and an
+  optional `## Summary`. Files already on disk stay version 1 until they are
+  restyled again (a re-transcribe does that), so readers must handle both.
+  Bump the number only for a breaking change; additive changes stay within
+  the current version.
 - `transcript_style: raw | styled` — which meeting body grammar the file
   currently carries (meetings only; see the lifecycle below). Absent means the
   file predates the key: sniff the body heading instead (`## Full Transcript`
@@ -59,24 +63,32 @@ shapes exist in the wild:
    raw form to `Call_<YYYY-MM-dd_HH-mm-ss>.md` (collision suffix `_<n>`), with
    `format_version: 1` and `transcript_style: raw`.
 2. **Restyle + rename (async)** — `MeetingTranscriptStyler.restyleTranscript`
-   rewrites the body into the styled form, re-emits `title:` first, preserves
-   every other frontmatter line (including `format_version`), rewrites
-   `transcript_style` to `styled` (replacing the `raw` marker — never
-   duplicated; legacy files without the key gain it), and renames the file to
+   rewrites the body into the version 2 styled form, rewrites the frontmatter
+   as described under "Version 2 frontmatter" (`title:` first, then
+   `format_version: 2` and `transcript_style: styled`, never duplicated),
+   moves pipeline keys to `.meta/<capture_id>.json`, and renames the file to
    `<YYYY-MM-dd> <title>.md` (collision suffix ` <n>`). Retained audio
-   directories follow the rename (`MeetingArtifactRenamer`). Unknown trailing
-   Markdown sections from older files are preserved.
+   directories follow the rename (`MeetingArtifactRenamer`). Unknown
+   frontmatter keys, a `## Summary` section and unknown trailing Markdown
+   sections from older files are preserved. Restyling a version 2 file again
+   changes nothing.
 
 The Home title editor may later rewrite `title:` and rename the file again. It
-also preserves unknown frontmatter and trailing sections.
+also preserves unknown frontmatter and trailing sections. With **Titles and
+summaries** on, the on-device label then adds `ai_*` keys and the body's
+`## Summary` (see below).
+
+New meetings no longer get the heuristic `auto_summary_*` keys. Older files
+keep them, and readers still parse them.
 
 ## Meeting frontmatter keys
 
-Written at initial save (all flat unless noted):
+Written at initial save (all flat unless noted). A version 2 restyle keeps
+only some of them in the Markdown; see "Version 2 frontmatter" below.
 
 | Key | Example | Notes |
 |-----|---------|-------|
-| `capture_id` | `"5E9A…"` | UUID, quoted. Same value as `transcript_id`. |
+| `capture_id` | `"5E9A…"` | UUID, quoted. Same value as `transcript_id`. The stable identity: readers fall back to it when `transcript_id` is absent (version 2 drops `transcript_id`). |
 | `capture_type` | `meeting` | Discriminator; dictation day files use `dictation_day`, writing day files `writing_day`. |
 | `format_version` | `1` | See Versioning. Absent = pre-versioning. |
 | `transcript_style` | `raw` / `styled` | See Versioning and lifecycle. |
@@ -231,8 +243,12 @@ writers leave them untouched.
 On-device title and summary (optional; only with Settings › Meetings ›
 **Titles and summaries** on). After a meeting is transcribed, imported or
 transcribed again, a small model on the Mac (Gemma 4 E2B instruct) reads the
-transcript and the app appends these flat keys. It never changes `title:`, the
-filename or the body:
+transcript and the app appends these flat keys. It never changes `title:` or
+the filename. The body gets two readable mirrors: the summary as a
+`## Summary` section right before `## Transcript` (inserted or replaced; a
+label without a summary removes the section only when its text is the old
+`ai_summary`), and the `# ` heading follows `ai_title` while it stands in for
+`title:` (and shows `title:` again when it no longer does):
 
 | Key | Example | Notes |
 |-----|---------|-------|
@@ -328,6 +344,128 @@ microphone section is omitted and `sources` reflects it.
 
 Produced by the async restyle. Filename `<YYYY-MM-dd> <title>.md`.
 
+### Version 2 (current)
+
+```markdown
+---
+title: "Meeting with Sarah"
+capture_id: "5E9A…"
+capture_type: meeting
+format_version: 2
+transcript_style: styled
+recorded_at: 2026-04-07T09:14:00-05:00
+date: 2026-04-07
+time: 09:14:00
+duration: "12:30"
+total_word_count: 42
+system_speakers: 1
+speakers:
+  - id: "0"
+    channel: system
+    …
+---
+
+# Meeting with Sarah
+
+Recorded Apr 7, 2026 at 9:14 AM  •  12 min, 30 sec  •  42 words  •  2 turns
+
+## Summary
+
+Sarah agreed to start the pilot next week.
+
+## Transcript
+
+[00:00] **You:** Thanks for making time today.
+
+[00:04] **Sarah:** Happy to help. Let's get started.
+```
+
+Transcript rows: one line per turn, blank-line separated:
+
+```
+[<MM:SS or HH:MM:SS>] **<label>:** <text>
+```
+
+- **The label is the display name alone.** Its channel comes from the
+  frontmatter `speakers:` rows: the one `channel:` (`mic` / `system`; a row
+  without one is `system`) that rows with that name use. A name with no row,
+  or rows on both channels, is the mic when it is `You` and the call audio
+  otherwise. Whenever that rule would give a row the wrong channel (the same
+  name on both channels, a mic voice with no row), the label spells the
+  channel out: `**Mic/Dana:**` / `**System/Dana:**`. Legacy wiki-link names
+  stay as written (`**[[Alex]]:**`).
+- **Turns are merged.** Consecutive turns by the same speaker become one row
+  while the next turn starts at most 8 s after the previous one, the row spans
+  at most 25 s (start to start), and its text stays at most 320 characters.
+  The row keeps the first turn's timestamp. Timestamps use the same
+  elapsed-time and legacy-read rules as raw transcripts.
+- The detail line joins parts with `  •  `: `Recorded <medium date, short
+  time>`, humanized duration, word count and the number of rows, when nonzero.
+- `## Summary` (optional) sits between the detail line and `## Transcript`.
+  It is the on-device `ai_summary`; readers of the transcript skip it.
+- An empty transcript renders as `_No transcript captured._`.
+- Unknown trailing Markdown sections, including old generated summary blocks,
+  are preserved after the transcript.
+- The restyle fails closed: if the body carries transcript text the entry
+  parser cannot understand, the file is left byte-for-byte untouched (still
+  raw-form, still `transcript_style: raw` if it had it).
+
+### Version 2 frontmatter
+
+The restyle writes, in this order: `title`, `capture_id`, `capture_type`,
+`format_version: 2`, `transcript_style: styled`, `recorded_at` (the
+recording start, ISO 8601 with the Mac's UTC offset), `date`, `time`,
+`duration`, `total_word_count`. `date` and `time` stay so every existing
+reader keeps working. Then, in their original order, every other key except
+the ones moved out:
+
+| Kept only when | Keys |
+|---|---|
+| Set | `starred`, `title_set_by_user`, `imported_at`, `mic_only`, `audio_health`, `mic_boost_prompt`, `system_audio_missing`, `microphone_audio_unusable`, `ai_*`, legacy `auto_summary_*` / `local_summary_*`, unknown keys |
+| Abnormal | `capture_quality` (`fair` / `degraded`), `audio_gaps` (> 0), `device_switches` (> 0), `system_audio_signal_verified` (`false`) |
+| Informative | `system_speakers` (> 0, read by speaker naming), `transcription_language` (not `auto`), `transcription_language_resolution` / `_resolved` (an explicit selection, or Automatic that `detected` a language) |
+| Non-empty | `speakers:`; `gap_events:` minus sub-second reconnect noise (`audio_gaps` drops the same events) |
+
+Always moved out: `processing_time`, `transcription_engine`,
+`diarization_engine`, `voiceprint_model`, `mic_utterances`,
+`system_utterances`, `mic_speakers`, `sources` and the duplicate
+`transcript_id`.
+
+### Pipeline sidecar: `.meta/<capture_id>.json`
+
+Everything the version 2 restyle removed from the frontmatter is written to
+`<meetings folder>/.meta/<capture_id>.json` (hidden folder `0700`, file `0600`,
+atomic write):
+
+```json
+{
+  "capture_id" : "5E9A…",
+  "frontmatter" : {
+    "capture_quality" : "good",
+    "gap_events" : ["System audio reconnect: 0.4s"],
+    "processing_time" : "41.3s",
+    "sources" : ["mic", "system_audio"],
+    "transcription_engine" : "parakeet_local"
+  },
+  "schema_version" : 1
+}
+```
+
+Values are the original frontmatter strings (`gap_events` and `sources` as
+string lists). It holds no transcript text, titles or names. It is keyed by
+`capture_id`, so title renames never orphan it; a later restyle merges into
+it, and deleting the meeting from Home moves it to the Trash with the
+transcript (Undo restores it). Writing it is best effort: a failure never fails
+the transcript save. CaptureKit reads it with `CaptureMeetingMetadataSidecar`;
+a key in the frontmatter wins over the sidecar. Known gap: moving the capture
+library in Settings copies Markdown and audio but not `.meta/` yet, so moved
+meetings lose this diagnostic copy (the Markdown is complete without it).
+
+### Version 1 (legacy, read-only)
+
+Files restyled before version 2 look like this; readers and speaker renames
+still handle them:
+
 ```markdown
 ---
 title: "Meeting with Sarah"
@@ -354,21 +492,10 @@ Thanks for making time today.
 Happy to help. Let's get started.
 ```
 
-Details:
-
-- The detail line joins parts with `  •  ` (two spaces around a bullet):
-  `Recorded <medium date, short time>`, humanized duration, word count and turn
-  count when nonzero.
-- Transcript entries are blank-line-separated blocks: a header line
-  `**<MM:SS or HH:MM:SS>**  [<Mic|System>/<label>]` (two spaces after the bold timestamp,
-  with the same elapsed-time and legacy-read rules as raw transcripts)
-  followed by the utterance text on the next line(s).
-- An empty transcript renders as `_No transcript captured._`.
-- Unknown trailing Markdown sections, including old generated summary blocks,
-  are preserved after the transcript.
-- The restyle fails closed: if the body carries transcript text the entry
-  parser cannot understand, the file is left byte-for-byte untouched (still
-  raw-form, still `transcript_style: raw` if it had it).
+Entries are blank-line-separated blocks: a header line
+`**<MM:SS or HH:MM:SS>**  [<Mic|System>/<label>]` (two spaces after the bold
+timestamp) followed by the utterance text on the next line(s). Version 1
+never merged turns.
 
 ## Dictation day files
 

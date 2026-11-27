@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 /// One speaker turn as the titles model sees it: consecutive lines by the
 /// same speaker merged, filler and stutters cleaned out.
@@ -21,6 +24,8 @@ enum MeetingTitlesTranscript {
     static let minimumWords = 40
 
     static func turns(fromMeetingMarkdown markdown: String) -> [MeetingTitlesTurn] {
+        // v2 rows (`[00:01] **Maya:** text`) as raw rows with their channel.
+        let markdown = TranscriptFrontmatterDialogue.bracketedLines(in: markdown)
         let transcript = LocalMeetingTranscriptExtractor.transcriptText(from: markdown)
         var lines: [(label: String, seconds: Int, text: String)] = []
         for rawLine in transcript.components(separatedBy: .newlines) {
@@ -126,8 +131,9 @@ enum MeetingTitlesTranscript {
 
     // MARK: - Transcript lines
 
-    /// Reads both saved shapes: styled `**00:01**  [System/Maya]` (text on
-    /// the next lines) and raw `[00:01] [System/Maya] text`.
+    /// Reads both bracket shapes: styled `**00:01**  [System/Maya]` (text on
+    /// the next lines) and raw `[00:01] [System/Maya] text` (v2 rows arrive
+    /// in the raw shape, see `turns(fromMeetingMarkdown:)`).
     private static func parseHeader(_ line: String) -> (label: String, seconds: Int, inlineText: String)? {
         var rest = Substring(line)
         let timestamp: Substring

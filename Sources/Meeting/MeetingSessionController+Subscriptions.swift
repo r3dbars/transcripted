@@ -257,15 +257,10 @@ extension MeetingSessionController {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
-            let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
-            // Always-on cheap field extraction so the search index covers every
-            // meeting. Runs after restyle (the body is now in canonical styled
-            // form) on this chained background task, and is idempotent +
-            // frontmatter-only.
-            if !styled.artifactPostProcessingBlocked {
-                MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
-            }
-            return styled
+            // New meetings no longer get heuristic `auto_summary_*` keys
+            // (format_version 2); the opt-in on-device label writes a real
+            // `## Summary` instead. Older files keep theirs.
+            return MeetingTranscriptStyler.restyleTranscript(at: url)
         }
         savedTranscriptRestyleTask = restyle
 

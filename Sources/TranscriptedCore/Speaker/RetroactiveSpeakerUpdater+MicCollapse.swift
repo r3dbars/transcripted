@@ -8,6 +8,10 @@ import Foundation
 extension TranscriptSaver {
 
     private static let micLabelRegex = try? NSRegularExpression(pattern: #"\[Mic/[^\]]*\]"#)
+    /// v2 rows (`[01:43] **Mic/Dana:** text`), after qualification.
+    private static let micDialogueLabelRegex = try? NSRegularExpression(
+        pattern: #"(?m)^(\[[0-9:]+\] )\*\*Mic/[^\n]*?:\*\*"#
+    )
     private static let localSpeakerBreakdownRegex = try? NSRegularExpression(
         pattern: #"(?s)\n#### Local Speaker Breakdown\n.*?\n\n"#
     )
@@ -39,40 +43,8 @@ extension TranscriptSaver {
                 return false
             }
 
-            // 1) Rewrite body mic labels. Replace `[Mic/<anything>]` with `[Mic/You]`.
-            if let regex = micLabelRegex {
-                let range = NSRange(content.startIndex..., in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: range, withTemplate: "[Mic/You]"
-                )
-            }
-
-            // 2) Mic section header: "Microphone (People in the Room)" -> "Microphone (You)"
-            content = content.replacingOccurrences(
-                of: "### Microphone (People in the Room)",
-                with: "### Microphone (You)"
-            )
-
-            // 3) Remove the "Local Speaker Breakdown" subsection entirely.
-            if let regex = localSpeakerBreakdownRegex {
-                let range = NSRange(content.startIndex..., in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: range, withTemplate: "\n"
-                )
-            }
-
-            // 4) Strip mic speakers from the YAML frontmatter `speakers:` block.
-            content = stripYAMLSpeakerEntries(in: content, channel: "mic")
-
-            // 5) "Speakers Detected: N" line inside the mic stats block — drop it.
-            //    Only remove inside the mic section so the remote stats line is untouched.
-            if let regex = speakersDetectedLineRegex,
-               let micHeaderRange = content.range(of: "### Microphone (You)") {
-                let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
-                let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: micSectionRange, withTemplate: "\n"
-                )
+            TranscriptFrontmatterDialogue.withQualifiedLabels(in: &content) { content in
+                collapseMicSpeakerLabels(in: &content)
             }
 
             do {
@@ -88,6 +60,53 @@ extension TranscriptSaver {
                 "collapsed": "\(collapsedUpdates.count)"
             ])
             return true
+        }
+    }
+
+    /// Body and frontmatter edits behind `collapseMicSpeakersToYou`. Expects
+    /// v2 labels qualified (see `TranscriptFrontmatterDialogue`).
+    private static func collapseMicSpeakerLabels(in content: inout String) {
+        // 1) Rewrite body mic labels. Replace `[Mic/<anything>]` with `[Mic/You]`,
+        //    and v2 `**Mic/<anything>:**` with `**Mic/You:**`.
+        if let regex = micLabelRegex {
+            let range = NSRange(content.startIndex..., in: content)
+            content = regex.stringByReplacingMatches(
+                in: content, options: [], range: range, withTemplate: "[Mic/You]"
+            )
+        }
+        if let regex = micDialogueLabelRegex {
+            let range = NSRange(content.startIndex..., in: content)
+            content = regex.stringByReplacingMatches(
+                in: content, options: [], range: range, withTemplate: "$1**Mic/You:**"
+            )
+        }
+
+        // 2) Mic section header: "Microphone (People in the Room)" -> "Microphone (You)"
+        content = content.replacingOccurrences(
+            of: "### Microphone (People in the Room)",
+            with: "### Microphone (You)"
+        )
+
+        // 3) Remove the "Local Speaker Breakdown" subsection entirely.
+        if let regex = localSpeakerBreakdownRegex {
+            let range = NSRange(content.startIndex..., in: content)
+            content = regex.stringByReplacingMatches(
+                in: content, options: [], range: range, withTemplate: "\n"
+            )
+        }
+
+        // 4) Strip mic speakers from the YAML frontmatter `speakers:` block.
+        content = stripYAMLSpeakerEntries(in: content, channel: "mic")
+
+        // 5) "Speakers Detected: N" line inside the mic stats block — drop it.
+        //    Only remove inside the mic section so the remote stats line is untouched.
+        if let regex = speakersDetectedLineRegex,
+           let micHeaderRange = content.range(of: "### Microphone (You)") {
+            let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
+            let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
+            content = regex.stringByReplacingMatches(
+                in: content, options: [], range: micSectionRange, withTemplate: "\n"
+            )
         }
     }
 

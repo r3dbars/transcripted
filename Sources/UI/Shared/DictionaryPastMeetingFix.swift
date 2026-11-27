@@ -591,9 +591,10 @@ enum DictionaryPastMeetingFix {
     }
 
     /// Where the spoken words begin on a line. Turn headers look like
-    /// `**00:12**  [Mic/Linus]` (styled) or `[00:01] [System/[[Alex]]] Hello`
-    /// (legacy); both the time and the speaker label are skipped. Any other
-    /// line is spoken text from its first character.
+    /// `[00:12] **Linus:** Hello` (styled, format 2), `**00:12**  [Mic/Linus]`
+    /// (styled, format 1) or `[00:01] [System/[[Alex]]] Hello` (raw); both the
+    /// time and the speaker label are skipped. Any other line is spoken text
+    /// from its first character.
     private static func spokenTextStart(in line: String) -> String.Index {
         guard let first = line.firstIndex(where: { !$0.isWhitespace }) else { return line.endIndex }
         var cursor: String.Index
@@ -622,6 +623,12 @@ enum DictionaryPastMeetingFix {
         if cursor < line.endIndex, line[cursor] == "[",
            let labelEnd = matchingClosingBracket(in: line, from: cursor) {
             cursor = line.index(after: labelEnd)
+        } else if line[first] == "[", line[cursor...].hasPrefix("**"),
+                  let labelEnd = line.range(of: ":**", range: cursor..<line.endIndex) {
+            cursor = labelEnd.upperBound
+            while cursor < line.endIndex, line[cursor].isWhitespace {
+                cursor = line.index(after: cursor)
+            }
         }
         return cursor
     }

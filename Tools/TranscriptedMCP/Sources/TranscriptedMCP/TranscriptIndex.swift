@@ -420,7 +420,14 @@ final class TranscriptIndex: @unchecked Sendable {
         )
     }
 
+    /// The prose summary shares the `title` column (title on the first
+    /// line, summary after it) so v10 indexes need no rebuild, which would
+    /// also drop every embedding. Search splits them again for display.
     private func insertSummarySearchDocument(_ summary: ParsedMeetingSummary, filename: String) throws {
+        let titleAndSummary = [summary.title ?? "", summary.summary ?? ""]
+            .map { $0.split(whereSeparator: \.isNewline).joined(separator: " ") }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         try bindExec(
             """
             INSERT INTO meeting_summary_documents
@@ -429,7 +436,7 @@ final class TranscriptIndex: @unchecked Sendable {
             """,
             bindings: [
                 .text(filename),
-                .text(summary.title ?? ""),
+                .text(summary.summary == nil ? (summary.title ?? "") : titleAndSummary),
                 .text(summary.attendees.joined(separator: "\n")),
                 .text(summary.decisions.joined(separator: "\n")),
                 .text(summary.actionItems.map(\.text).joined(separator: "\n")),

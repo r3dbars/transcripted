@@ -8,7 +8,7 @@ func testMeetingTitlesFrontmatter() {
     )
     let stamp = Date(timeIntervalSince1970: 1_800_000_000)
 
-    runSuite("Writing adds the ai keys and leaves the body byte for byte") {
+    runSuite("Writing adds the ai keys, a body summary and the model title as the heading") {
         let raw = MeetingTitlesFixtures.meetingMarkdown()
         guard let updated = MeetingTitlesFrontmatterWriter.markdown(
             byApplying: label, replaceableTitle: "Meeting with Priya", speakers: "s1", to: raw, generatedAt: stamp
@@ -25,7 +25,11 @@ func testMeetingTitlesFrontmatter() {
         assertEqual(values["ai_summary_version"], "1")
         assertEqual(values["ai_summary_speakers"], "s1", "which speaker names the label was written from")
         assertEqual(values["title"], "Meeting with Priya", "title: is never changed")
-        assertEqual(TranscriptFrontmatter.body(in: updated), TranscriptFrontmatter.body(in: raw))
+        assertEqual(
+            TranscriptFrontmatter.body(in: updated),
+            labeledBody(of: raw),
+            "the body changes only by the heading and the summary section"
+        )
     }
 
     runSuite("Writing is idempotent: a file with current keys is left alone") {
@@ -115,7 +119,7 @@ func testMeetingTitlesFrontmatter() {
         assertNil(MeetingTitlesFrontmatterWriter.markdown(byApplying: empty, replaceableTitle: nil, speakers: "s1", to: MeetingTitlesFixtures.meetingMarkdown()))
     }
 
-    runSuite("The file write runs under the serializer and keeps the body") {
+    runSuite("The file write runs under the serializer and keeps the transcript") {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let raw = MeetingTitlesFixtures.meetingMarkdown()
@@ -123,7 +127,7 @@ func testMeetingTitlesFrontmatter() {
         assertEqual(MeetingTitlesFrontmatterWriter.apply(label, replaceableTitle: "Meeting with Priya", speakers: "s1", at: url), .written)
         assertEqual(MeetingTitlesFrontmatterWriter.apply(label, replaceableTitle: "Meeting with Priya", speakers: "s1", at: url), .skipped)
         let saved = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        assertEqual(TranscriptFrontmatter.body(in: saved), TranscriptFrontmatter.body(in: raw))
+        assertEqual(TranscriptFrontmatter.body(in: saved), labeledBody(of: raw))
         assertTrue(FileManager.default.fileExists(atPath: url.path), "the file is not renamed")
     }
 
@@ -152,7 +156,7 @@ func testMeetingTitlesFrontmatter() {
         assertNil(values["ai_summary_status"])
         assertEqual(values["ai_summary_speakers"], "s2", "the names it was tried with, so it isn't tried again")
         assertEqual(updated.components(separatedBy: "ai_summary_speakers:").count, 2, "written once")
-        assertEqual(TranscriptFrontmatter.body(in: updated), TranscriptFrontmatter.body(in: raw))
+        assertEqual(TranscriptFrontmatter.body(in: updated), TranscriptFrontmatter.body(in: labeled), "the earlier summary and heading stay")
         assertTrue(MeetingTitlesFrontmatterWriter.isCurrent(values: values, speakers: "s2"))
         assertNil(MeetingTitlesFrontmatterWriter.markdown(recordingNoSummary: .noUsableReply, speakers: "s2", to: updated))
     }
@@ -226,4 +230,16 @@ func testMeetingTitlesFrontmatter() {
         let url = URL(fileURLWithPath: "/tmp/unused.md")
         assertEqual(MeetingTranscriptStyler.ruleTitle(forMeetingMarkdown: raw, fallbackURL: url), "Meeting with Priya")
     }
+}
+
+/// The fixture body after a label with a model title and summary: the
+/// heading reads the model title and `## Summary` sits right before the
+/// transcript. Everything else is byte for byte.
+private func labeledBody(of raw: String) -> String? {
+    TranscriptFrontmatter.body(in: raw)?
+        .replacingOccurrences(of: "\n# Meeting with Priya\n", with: "\n# Vendor contract renewal\n")
+        .replacingOccurrences(
+            of: "\n## Transcript\n",
+            with: "\n## Summary\n\nTwo bids were compared. The current vendor stays.\n\n## Transcript\n"
+        )
 }

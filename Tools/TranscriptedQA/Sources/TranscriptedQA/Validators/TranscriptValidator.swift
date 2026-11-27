@@ -63,9 +63,15 @@ struct TranscriptValidator {
                 continue
             }
 
+            // format_version 2 moves pipeline keys to `.meta/<capture_id>.json`;
+            // the frontmatter wins when both have a key.
+            let sidecar = CaptureMeetingMetadataSidecar.values(forMeetingAt: file, content: content)
+            func value(for key: String) -> String? { yaml.value(for: key) ?? sidecar[key] }
+            func hasKey(_ key: String) -> Bool { yaml.hasKey(key) || sidecar[key] != nil }
+
             // Required keys
             let requiredKeys = ["date", "time", "duration", "transcription_engine", "diarization_engine"]
-            let missingKeys = requiredKeys.filter { !yaml.hasKey($0) }
+            let missingKeys = requiredKeys.filter { !hasKey($0) }
             if missingKeys.isEmpty {
                 results.append(.pass("transcript/yaml-required-keys", target: name))
             } else {
@@ -73,22 +79,22 @@ struct TranscriptValidator {
             }
 
             // Engine values
-            if let transcriptionEngine = yaml.value(for: "transcription_engine"),
+            if let transcriptionEngine = value(for: "transcription_engine"),
                validTranscriptionEngines.contains(transcriptionEngine) {
                 results.append(.pass("transcript/yaml-engine-stt", target: name))
             } else {
-                results.append(.fail("transcript/yaml-engine-stt", target: name, detail: "Expected supported local STT engine, got \(yaml.value(for: "transcription_engine") ?? "nil")"))
+                results.append(.fail("transcript/yaml-engine-stt", target: name, detail: "Expected supported local STT engine, got \(value(for: "transcription_engine") ?? "nil")"))
             }
 
-            if let diarizationEngine = yaml.value(for: "diarization_engine"),
+            if let diarizationEngine = value(for: "diarization_engine"),
                validDiarizationEngines.contains(diarizationEngine) {
                 results.append(.pass("transcript/yaml-engine-diarize", target: name))
             } else {
-                results.append(.fail("transcript/yaml-engine-diarize", target: name, detail: "Expected supported diarization engine, got \(yaml.value(for: "diarization_engine") ?? "nil")"))
+                results.append(.fail("transcript/yaml-engine-diarize", target: name, detail: "Expected supported diarization engine, got \(value(for: "diarization_engine") ?? "nil")"))
             }
 
             // Sources
-            if let sources = yaml.value(for: "sources") {
+            if let sources = value(for: "sources") {
                 let sourceList = sources.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                 let validValues: Set<String> = ["mic", "system_audio"]
                 let allValid = !sourceList.isEmpty && sourceList.allSatisfy { validValues.contains($0) }
@@ -102,7 +108,7 @@ struct TranscriptValidator {
             }
 
             // Capture quality
-            if let quality = yaml.value(for: "capture_quality") {
+            if let quality = value(for: "capture_quality") {
                 let validQualities = ["excellent", "good", "fair", "degraded"]
                 if validQualities.contains(quality) {
                     results.append(.pass("transcript/yaml-capture-quality", target: name))
@@ -115,9 +121,9 @@ struct TranscriptValidator {
 
             // Non-negative counts
             for key in ["mic_utterances", "system_utterances", "total_word_count"] {
-                if let val = yaml.value(for: key), let num = Int(val), num >= 0 {
+                if let val = value(for: key), let num = Int(val), num >= 0 {
                     results.append(.pass("transcript/yaml-count-\(key)", target: name))
-                } else if yaml.hasKey(key) {
+                } else if hasKey(key) {
                     results.append(.fail("transcript/yaml-count-\(key)", target: name, detail: "Invalid or negative value"))
                 } else {
                     results.append(.warn("transcript/yaml-count-\(key)", target: name, detail: "\(key) not present — check skipped"))

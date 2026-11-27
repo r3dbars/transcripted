@@ -171,6 +171,9 @@ extension TranscriptSaver {
         content = content.replacingOccurrences(of: "name: \"\(yamlSafeOldName)\"", with: "name: \"\(yamlSafeName)\"")
         content = content.replacingOccurrences(of: "[System/\(oldName)]", with: "[System/\(newName)]")
         content = content.replacingOccurrences(of: "[Mic/\(oldName)]", with: "[Mic/\(newName)]")
+        // v2 rows, qualified by `TranscriptFrontmatterDialogue.withQualifiedLabels`.
+        content = content.replacingOccurrences(of: "**System/\(oldName):**", with: "**System/\(newName):**")
+        content = content.replacingOccurrences(of: "**Mic/\(oldName):**", with: "**Mic/\(newName):**")
         content = content.replacingOccurrences(of: "[[\(oldName)]]", with: "[[\(newName)]]")
         content = content.replacingOccurrences(of: "**\(oldName):**", with: "**\(newName):**")
 

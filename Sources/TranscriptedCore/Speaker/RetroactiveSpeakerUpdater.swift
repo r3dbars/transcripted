@@ -256,6 +256,16 @@ extension TranscriptSaver {
         update: DeferredSpeakerNameUpdate,
         newName: String
     ) -> Bool {
+        TranscriptFrontmatterDialogue.withQualifiedLabels(in: &content) { content in
+            applyQualifiedDeferredSpeakerName(in: &content, update: update, newName: newName)
+        }
+    }
+
+    private static func applyQualifiedDeferredSpeakerName(
+        in content: inout String,
+        update: DeferredSpeakerNameUpdate,
+        newName: String
+    ) -> Bool {
         guard let oldName = currentSpeakerName(
             in: content,
             diarizerSpeakerId: update.diarizerSpeakerId,
@@ -426,6 +436,17 @@ extension TranscriptSaver {
         newName: String,
         fileName: String
     ) -> Bool {
+        TranscriptFrontmatterDialogue.withQualifiedLabels(in: &content) { content in
+            applyQualifiedRetroactiveRename(in: &content, dbId: dbId, newName: newName, fileName: fileName)
+        }
+    }
+
+    private static func applyQualifiedRetroactiveRename(
+        in content: inout String,
+        dbId: UUID,
+        newName: String,
+        fileName: String
+    ) -> Bool {
         var lines = content.components(separatedBy: "\n")
         let rows = parseFrontmatterSpeakerRows(in: lines)
         let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != hedgedName(newName, replacing: $0.name) }
@@ -518,17 +539,21 @@ extension TranscriptSaver {
                 return false
             }
 
-            for entry in entries {
-                let key = entry.channel.speakerKey(diarizerSpeakerId: entry.diarizerSpeakerId)
-                let speakerId = redirectedSpeakerIdsByKey[key] ?? entry.id
-                writeFrontmatterSpeakerMetadata(
-                    in: &content,
-                    diarizerSpeakerId: entry.diarizerSpeakerId,
-                    channel: entry.channel,
-                    persistentSpeakerId: speakerId,
-                    name: "Speaker \(entry.diarizerSpeakerId)",
-                    source: "db_pending"
-                )
+            // Body labels stay as saved, so v2 labels keep the channel they
+            // were read with even when a row's name changes.
+            TranscriptFrontmatterDialogue.withQualifiedLabels(in: &content) { content in
+                for entry in entries {
+                    let key = entry.channel.speakerKey(diarizerSpeakerId: entry.diarizerSpeakerId)
+                    let speakerId = redirectedSpeakerIdsByKey[key] ?? entry.id
+                    writeFrontmatterSpeakerMetadata(
+                        in: &content,
+                        diarizerSpeakerId: entry.diarizerSpeakerId,
+                        channel: entry.channel,
+                        persistentSpeakerId: speakerId,
+                        name: "Speaker \(entry.diarizerSpeakerId)",
+                        source: "db_pending"
+                    )
+                }
             }
 
             do {
@@ -571,83 +596,15 @@ extension TranscriptSaver {
                 return false
             }
 
-            let obsidianEnabled = isObsidianFormatted(content)
-            let updatesByChannelKey = makeSpeakerNameChangesByChannelKey(
-                updates: updates,
-                content: content
-            )
-
-            for update in updates {
-                updateFrontmatterSpeakerMetadata(in: &content, update: update)
-            }
-
-            if !rewriteFullTranscriptSection(
-                in: &content,
-                result: transcriptionResult,
-                updatesByChannelKey: updatesByChannelKey,
-                obsidianEnabled: obsidianEnabled
-            ) {
-                AppLogger.pipeline.warning("Falling back to scoped transcript label updates", [
-                    "path": transcriptURL.lastPathComponent
-                ])
-                guard applyScopedTranscriptLabelReplacements(
+            let rewritten = TranscriptFrontmatterDialogue.withQualifiedLabels(in: &content) { content in
+                applySpeakerNameUpdates(
                     in: &content,
-                    updatesByChannelKey: updatesByChannelKey,
-                    result: transcriptionResult
-                ) else {
-                    AppLogger.pipeline.error("Scoped transcript label fallback was ambiguous", [
-                        "path": transcriptURL.lastPathComponent
-                    ])
-                    return false
-                }
+                    transcriptURL: transcriptURL,
+                    updates: updates,
+                    transcriptionResult: transcriptionResult
+                )
             }
-
-            if !rewriteRemoteSpeakerBreakdown(
-                in: &content,
-                result: transcriptionResult,
-                updatesByChannelKey: updatesByChannelKey
-            ) {
-                AppLogger.pipeline.warning("Falling back to scoped remote speaker breakdown updates", [
-                    "path": transcriptURL.lastPathComponent
-                ])
-                guard applyScopedBreakdownNameReplacements(
-                    in: &content,
-                    updatesByChannelKey: updatesByChannelKey,
-                    channels: [.system],
-                    result: transcriptionResult
-                ) else {
-                    AppLogger.pipeline.error("Scoped remote speaker breakdown fallback was ambiguous", [
-                        "path": transcriptURL.lastPathComponent
-                    ])
-                    return false
-                }
-            }
-
-            if !rewriteLocalSpeakerBreakdownIfPresent(
-                in: &content,
-                result: transcriptionResult,
-                updatesByChannelKey: updatesByChannelKey
-            ) {
-                AppLogger.pipeline.warning("Falling back to scoped local speaker breakdown updates", [
-                    "path": transcriptURL.lastPathComponent
-                ])
-                guard applyScopedBreakdownNameReplacements(
-                    in: &content,
-                    updatesByChannelKey: updatesByChannelKey,
-                    channels: [.mic],
-                    result: transcriptionResult
-                ) else {
-                    AppLogger.pipeline.error("Scoped local speaker breakdown fallback was ambiguous", [
-                        "path": transcriptURL.lastPathComponent
-                    ])
-                    return false
-                }
-            }
-
-            // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
-            // PyAnnote can over-segment one person into 2 clusters; after naming, both become
-            // e.g. "Timothy", producing duplicate lines in the breakdown.
-            content = SpeakerBreakdownConsolidator.consolidate(content)
+            guard rewritten else { return false }
 
             // Atomic write back
             do {
@@ -665,6 +622,95 @@ extension TranscriptSaver {
 
             return true
         }
+    }
+
+    /// The in-memory half of `updateSpeakerNames`: frontmatter, transcript
+    /// labels and breakdowns. Expects v2 labels qualified. False when a
+    /// rewrite could not prove itself unambiguous.
+    private static func applySpeakerNameUpdates(
+        in content: inout String,
+        transcriptURL: URL,
+        updates: [SpeakerNameUpdate],
+        transcriptionResult: TranscriptionResult
+    ) -> Bool {
+        let obsidianEnabled = isObsidianFormatted(content)
+        let updatesByChannelKey = makeSpeakerNameChangesByChannelKey(
+            updates: updates,
+            content: content
+        )
+
+        for update in updates {
+            updateFrontmatterSpeakerMetadata(in: &content, update: update)
+        }
+
+        if !rewriteFullTranscriptSection(
+            in: &content,
+            result: transcriptionResult,
+            updatesByChannelKey: updatesByChannelKey,
+            obsidianEnabled: obsidianEnabled
+        ) {
+            AppLogger.pipeline.warning("Falling back to scoped transcript label updates", [
+                "path": transcriptURL.lastPathComponent
+            ])
+            guard applyScopedTranscriptLabelReplacements(
+                in: &content,
+                updatesByChannelKey: updatesByChannelKey,
+                result: transcriptionResult
+            ) else {
+                AppLogger.pipeline.error("Scoped transcript label fallback was ambiguous", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+        }
+
+        if !rewriteRemoteSpeakerBreakdown(
+            in: &content,
+            result: transcriptionResult,
+            updatesByChannelKey: updatesByChannelKey
+        ) {
+            AppLogger.pipeline.warning("Falling back to scoped remote speaker breakdown updates", [
+                "path": transcriptURL.lastPathComponent
+            ])
+            guard applyScopedBreakdownNameReplacements(
+                in: &content,
+                updatesByChannelKey: updatesByChannelKey,
+                channels: [.system],
+                result: transcriptionResult
+            ) else {
+                AppLogger.pipeline.error("Scoped remote speaker breakdown fallback was ambiguous", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+        }
+
+        if !rewriteLocalSpeakerBreakdownIfPresent(
+            in: &content,
+            result: transcriptionResult,
+            updatesByChannelKey: updatesByChannelKey
+        ) {
+            AppLogger.pipeline.warning("Falling back to scoped local speaker breakdown updates", [
+                "path": transcriptURL.lastPathComponent
+            ])
+            guard applyScopedBreakdownNameReplacements(
+                in: &content,
+                updatesByChannelKey: updatesByChannelKey,
+                channels: [.mic],
+                result: transcriptionResult
+            ) else {
+                AppLogger.pipeline.error("Scoped local speaker breakdown fallback was ambiguous", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+        }
+
+        // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
+        // PyAnnote can over-segment one person into 2 clusters; after naming, both become
+        // e.g. "Timothy", producing duplicate lines in the breakdown.
+        content = SpeakerBreakdownConsolidator.consolidate(content)
+        return true
     }
 
     static func restrictTranscriptToOwnerOnly(_ transcriptURL: URL) {

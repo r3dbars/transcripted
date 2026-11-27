@@ -55,7 +55,7 @@ public struct ParsedMeetingCapture {
 /// dictation day files, and writing day files). Single source of truth for
 /// TranscriptedCLI and TranscriptedMCP.
 public enum CaptureMarkdownParser {
-    private struct ParsedTranscriptEntry {
+    struct ParsedTranscriptEntry {
         let timestamp: String
         let startSeconds: Double
         let source: String
@@ -63,7 +63,7 @@ public enum CaptureMarkdownParser {
         let text: String
     }
 
-    private struct ParsedFrontmatterSpeaker {
+    struct ParsedFrontmatterSpeaker {
         let rawId: String
         let channel: String?
         let name: String
@@ -154,11 +154,20 @@ public enum CaptureMarkdownParser {
 
     // MARK: - Meetings
 
-    public static func parseMeeting(from content: String) -> ParsedMeetingCapture? {
+    /// `metadataSidecar` holds the values a `format_version: 2` restyle moved
+    /// out of the Markdown (`CaptureMeetingMetadataSidecar`); a key in the
+    /// frontmatter always wins over it.
+    public static func parseMeeting(
+        from content: String,
+        metadataSidecar: [String: String] = [:]
+    ) -> ParsedMeetingCapture? {
         guard let document = parseFrontmatter(from: content) else { return nil }
 
-        let entries = parseTranscriptEntries(from: document.body)
         let speakerMetadata = parseFrontmatterSpeakers(from: content)
+        let entries = parseTranscriptEntries(
+            from: document.body,
+            dialogueChannels: dialogueChannelsByName(speakerMetadata)
+        )
         let micSpeakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(
             speakerMetadata,
             channel: "mic",
@@ -248,15 +257,14 @@ public enum CaptureMarkdownParser {
             )
         }
 
-        let date = document.values["date"] ?? "1970-01-01"
-        let time = document.values["time"] ?? "00:00:00"
+        let values = metadataSidecar.merging(document.values) { _, frontmatter in frontmatter }
         return ParsedMeetingCapture(
-            datetime: "\(date)T\(time)",
-            durationSeconds: parseDurationSeconds(document.values["duration"]),
-            droppedSegments: Int(document.values["dropped_segments"] ?? "") ?? 0,
-            sttEngine: document.values["transcription_engine"] ?? "unknown",
-            diarizationEngine: document.values["diarization_engine"] ?? "unknown",
-            voiceprintModel: document.values["voiceprint_model"].flatMap { $0.isEmpty ? nil : $0 },
+            datetime: localDateTime(values),
+            durationSeconds: parseDurationSeconds(values["duration"]),
+            droppedSegments: Int(values["dropped_segments"] ?? "") ?? 0,
+            sttEngine: values["transcription_engine"] ?? "unknown",
+            diarizationEngine: values["diarization_engine"] ?? "unknown",
+            voiceprintModel: values["voiceprint_model"].flatMap { $0.isEmpty ? nil : $0 },
             formatVersion: Int(document.values["format_version"] ?? ""),
             transcriptStyle: document.values["transcript_style"],
             speakers: speakers,
@@ -426,13 +434,19 @@ public enum CaptureMarkdownParser {
 
     // MARK: - Transcript entries
 
-    private static func parseTranscriptEntries(from body: String) -> [ParsedTranscriptEntry] {
+    private static func parseTranscriptEntries(
+        from body: String,
+        dialogueChannels: [String: Set<String>]
+    ) -> [ParsedTranscriptEntry] {
         if let range = body.range(of: "## Transcript\n\n") {
             let transcriptBody = String(body[range.upperBound...])
             let chunks = transcriptBody
                 .components(separatedBy: "\n\n")
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            let entries = chunks.compactMap(parseStyledTranscriptEntry)
+            let entries = chunks.compactMap { chunk in
+                parseDialogueTranscriptEntry(chunk, channels: dialogueChannels)
+                    ?? parseStyledTranscriptEntry(chunk)
+            }
             if !entries.isEmpty { return entries }
         }
 
@@ -745,7 +759,7 @@ public enum CaptureMarkdownParser {
         }
     }
 
-    private static func parseTimestampSeconds(_ timestamp: String) -> Double {
+    static func parseTimestampSeconds(_ timestamp: String) -> Double {
         let components = timestamp.split(separator: ":").compactMap { Double($0) }
         switch components.count {
         case 2:
@@ -757,7 +771,7 @@ public enum CaptureMarkdownParser {
         }
     }
 
-    private static func unwrapSpeakerLabel(_ label: String) -> String {
+    static func unwrapSpeakerLabel(_ label: String) -> String {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[["), trimmed.hasSuffix("]]") {
             return String(trimmed.dropFirst(2).dropLast(2))

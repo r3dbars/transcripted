@@ -20,6 +20,9 @@ public struct ParsedMeetingSummary: Equatable {
     }
 
     public let title: String?
+    /// Prose summary: the on-device `ai_summary` (mirrored as the body's
+    /// `## Summary` section), else its one-line `ai_summary_line`.
+    public let summary: String?
     public let attendees: [String]
     public let decisions: [String]
     public let actionItems: [ActionItem]
@@ -27,12 +30,14 @@ public struct ParsedMeetingSummary: Equatable {
 
     public init(
         title: String?,
+        summary: String? = nil,
         attendees: [String] = [],
         decisions: [String],
         actionItems: [ActionItem],
         openQuestions: [String]
     ) {
         self.title = title
+        self.summary = summary
         self.attendees = attendees
         self.decisions = decisions
         self.actionItems = actionItems
@@ -41,7 +46,9 @@ public struct ParsedMeetingSummary: Equatable {
 
     public var isEmpty: Bool {
         let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSummary = summary?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (cleanTitle?.isEmpty ?? true)
+            && (cleanSummary?.isEmpty ?? true)
             && attendees.isEmpty
             && decisions.isEmpty
             && actionItems.isEmpty
@@ -58,7 +65,11 @@ public struct ParsedMeetingSummary: Equatable {
 /// - legacy inline local summary written into the meeting transcript: frontmatter
 ///   `local_summary_version` plus a `## Local Summary` body block with `###`
 ///   subsections (and a pipe-joined `local_summary_*` frontmatter fallback).
-/// - inline always-on quick summary written into `auto_summary_*` frontmatter.
+/// - inline always-on quick summary written into `auto_summary_*` frontmatter
+///   (legacy: new meetings no longer get it).
+/// - the opt-in on-device label: `ai_title` and `ai_summary` /
+///   `ai_summary_line` frontmatter, mirrored as a body `## Summary` section.
+///   It joins whichever structured shape the file also has.
 /// - a generated `meeting_summary` sidecar file with `#` sections.
 public enum CaptureSummaryParser {
     private static let startMarker = "<!-- transcripted:local-summary:start v=1 -->"
@@ -73,6 +84,7 @@ public enum CaptureSummaryParser {
         }
         let values = document.values
         let body = document.body
+        let ai = aiLabel(values: values, body: body)
 
         if values["capture_type"] == "meeting_summary" {
             return assemble(
@@ -88,7 +100,8 @@ public enum CaptureSummaryParser {
         if values["local_summary_version"] != nil {
             let block = localSummaryBlock(in: body) ?? body
             if let localSummary = assemble(
-                title: cleanTitle(values["local_summary_title"]),
+                title: cleanTitle(values["local_summary_title"]) ?? ai.title,
+                summary: ai.summary,
                 attendees: inlineItems("### Attendees", in: block, fallback: nil)
                     + inlineItems("### Participants", in: block, fallback: values["local_summary_participants"]),
                 decisions: inlineItems("### Decisions", in: block, fallback: values["local_summary_decisions"]),
@@ -101,7 +114,8 @@ public enum CaptureSummaryParser {
 
         if values["auto_summary_version"] != nil {
             return assemble(
-                title: nil,
+                title: ai.title,
+                summary: ai.summary,
                 attendees: [],
                 decisions: frontmatterItems(values["auto_summary_decisions"]),
                 actions: frontmatterItems(values["auto_summary_action_items"]),
@@ -109,13 +123,39 @@ public enum CaptureSummaryParser {
             )
         }
 
+        if ai.title != nil || ai.summary != nil {
+            return assemble(title: ai.title, summary: ai.summary, attendees: [], decisions: [], actions: [], questions: [])
+        }
+
         return nil
+    }
+
+    /// The on-device label. Its title counts only while it stands in for
+    /// `title:` (the display rule in docs/capture-format.md); the summary
+    /// prefers `ai_summary`, then the body's `## Summary`, then the line.
+    private static func aiLabel(values: [String: String], body: String) -> (title: String?, summary: String?) {
+        guard values["ai_summary_version"] != nil || section("## Summary", in: body, headingLevel: "##") != nil else {
+            return (nil, nil)
+        }
+        let savedTitle = values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replaces = values["ai_title_replaces"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let titleStandsIn = values["title_set_by_user"] != "true" && (savedTitle == nil || savedTitle == replaces)
+        let title = titleStandsIn ? cleanTitle(values["ai_title"]) : nil
+        let summary = [
+            values["ai_summary"],
+            section("## Summary", in: body, headingLevel: "##"),
+            values["ai_summary_line"],
+        ]
+            .map { cleanMarkdown($0).split(whereSeparator: \.isNewline).joined(separator: " ") }
+            .first { !$0.isEmpty && $0 != placeholder }
+        return (title, summary)
     }
 
     // MARK: - Assembly
 
     private static func assemble(
         title: String?,
+        summary: String? = nil,
         attendees: [String],
         decisions: [String],
         actions: [String],
@@ -123,6 +163,7 @@ public enum CaptureSummaryParser {
     ) -> ParsedMeetingSummary? {
         let summary = ParsedMeetingSummary(
             title: title,
+            summary: summary,
             attendees: unique(attendees),
             decisions: decisions,
             actionItems: actions.map(actionItem(from:)),

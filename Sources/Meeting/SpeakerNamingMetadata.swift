@@ -39,7 +39,10 @@ enum SpeakerNamingMetadata {
                 values["imported_at"] == nil,
                 let start = TranscriptFrontmatter.recordedAt(values: values)
             else { return nil }
-            return (start, values["system_speakers"].flatMap { Int($0) })
+            // Format 2 omits a zero count; earlier files always wrote it.
+            let remoteVoices = values["system_speakers"].flatMap { Int($0) }
+                ?? (values["format_version"] == "2" ? 0 : nil)
+            return (start, remoteVoices)
         }.value
         guard let recording else { return nil }
         let names = await MeetingInviteeCalendarReader.shared.inviteeNames(recordingStart: recording.start)

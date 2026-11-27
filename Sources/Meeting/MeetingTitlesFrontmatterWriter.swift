@@ -7,8 +7,10 @@ import TranscriptedCore
 /// Writes the on-device title, line and summary into a saved meeting's
 /// frontmatter (`ai_*` keys; see docs/capture-format.md). Same safety as
 /// `MeetingQuickSummaryWriter`: one read-modify-write under the transcript
-/// serializer, an atomic rewrite, idempotent, and the body is never touched.
-/// The file is never renamed, and `title:` is never changed.
+/// serializer, an atomic rewrite, idempotent. The file is never renamed, and
+/// `title:` is never changed. The body gets two readable mirrors of the keys:
+/// a `## Summary` section before the transcript, and the `# ` heading follows
+/// `ai_title` while it stands in for `title:`.
 enum MeetingTitlesFrontmatterWriter {
     static let version = "1"
     static let model = "gemma-4-e2b-it-q4km"
@@ -132,6 +134,13 @@ enum MeetingTitlesFrontmatterWriter {
             guard let key = frontmatterKey(in: line) else { return true }
             return !MeetingTitlesKeys.all.contains(key)
         }
+        // The earlier label's keys go, so its body mirrors go with them.
+        var body = MeetingTitlesBody.removingSummary(document.values[MeetingTitlesKeys.summary], from: document.body)
+        body = MeetingTitlesBody.replacingHeading(
+            from: [document.values[MeetingTitlesKeys.title]].compactMap { $0 },
+            to: document.values["title"],
+            in: body
+        )
         let appended = [
             yamlLine(MeetingTitlesKeys.status, status.rawValue),
             yamlLine(MeetingTitlesKeys.model, model),
@@ -139,7 +148,7 @@ enum MeetingTitlesFrontmatterWriter {
             yamlLine(MeetingTitlesKeys.speakers, speakers),
             yamlLine(MeetingTitlesKeys.generatedAt, DateFormattingHelper.formatISO8601(generatedAt)),
         ]
-        return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(document.body)"
+        return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(body)"
     }
 
     /// Pure transform. Nil when nothing should change.
@@ -166,9 +175,11 @@ enum MeetingTitlesFrontmatterWriter {
             return !MeetingTitlesKeys.all.contains(key)
         }
         var appended: [String] = []
+        var writtenTitle: String?
         if let title = label.title, mayReplaceTitle, let savedTitle {
             appended.append(yamlLine(MeetingTitlesKeys.title, title))
             appended.append(yamlLine(MeetingTitlesKeys.titleReplaces, savedTitle))
+            writtenTitle = yamlSafe(title)
         }
         if let line = label.line { appended.append(yamlLine(MeetingTitlesKeys.line, line)) }
         if let summary = label.summary { appended.append(yamlLine(MeetingTitlesKeys.summary, summary)) }
@@ -179,7 +190,21 @@ enum MeetingTitlesFrontmatterWriter {
             yamlLine(MeetingTitlesKeys.speakers, speakers),
             yamlLine(MeetingTitlesKeys.generatedAt, DateFormattingHelper.formatISO8601(generatedAt)),
         ]
-        return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(document.body)"
+
+        // The heading shows what Home shows: the model's title while it
+        // stands in for `title:`, else `title:` again (an earlier model title
+        // that this label doesn't repeat).
+        var body = MeetingTitlesBody.replacingHeading(
+            from: [savedTitle, document.values[MeetingTitlesKeys.title]].compactMap { $0 },
+            to: writtenTitle ?? document.values["title"],
+            in: document.body
+        )
+        if let summary = label.summary.map(yamlSafe), !summary.isEmpty {
+            body = MeetingTitlesBody.settingSummary(summary, in: body)
+        } else {
+            body = MeetingTitlesBody.removingSummary(document.values[MeetingTitlesKeys.summary], from: body)
+        }
+        return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(body)"
     }
 
     private static func frontmatterKey(in line: String) -> String? {

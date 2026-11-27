@@ -19,7 +19,10 @@ struct ContextArtifactFile {
 enum TranscriptLoader {
     static func loadMeeting(_ url: URL) -> AgentTranscript? {
         guard let content = CaptureMarkdown.readBoundedContents(of: url),
-              let parsed = CaptureMarkdownParser.parseMeeting(from: content) else {
+              let parsed = CaptureMarkdownParser.parseMeeting(
+                from: content,
+                metadataSidecar: CaptureMeetingMetadataSidecar.values(forMeetingAt: url, content: content)
+              ) else {
             log("Cannot read meeting markdown")
             return nil
         }
@@ -58,8 +61,9 @@ enum TranscriptLoader {
     }
 
     /// Structured summary for a saved meeting. It prefers summary fields inside
-    /// the transcript (`auto_summary_*` heuristic frontmatter or older local
-    /// summary fields and blocks), then falls back to a legacy
+    /// the transcript (the on-device `ai_*` label and `## Summary`, older
+    /// `auto_summary_*` heuristic frontmatter, or local summary fields and
+    /// blocks), then falls back to a legacy
     /// `<stem>.summary.md` sidecar so old artifacts remain readable.
     ///
     /// The sidecar branch is a legacy-compat fallback; a sidecar edited in

@@ -164,13 +164,15 @@ enum SpeakerVoiceprintTranscriptScan {
         pattern: #"^\*\*([0-9]+(?::[0-9]+){1,2})\*\*\s+\[(Mic|System)/(.+)\]$"#
     )
 
-    /// Every transcript row in a saved meeting's body, raw (`[MM:SS] [System/Ann] text`)
-    /// or styled (`**MM:SS**  [System/Ann]`). `knownLabels` are tried first so a
+    /// Every transcript row in a saved meeting's body, raw (`[MM:SS] [System/Ann] text`),
+    /// v1 styled (`**MM:SS**  [System/Ann]`) or v2 styled (`[MM:SS] **Ann:** text`,
+    /// its channel read from the frontmatter). `knownLabels` are tried first so a
     /// name containing `] ` still parses whole.
     static func transcriptRows(
         in markdown: String,
         knownLabels: [String] = []
     ) -> [SpeakerVoiceprintMigrationPolicy.TranscriptRow] {
+        let markdown = TranscriptFrontmatterDialogue.bracketedLines(in: markdown)
         let body = TranscriptFrontmatter.body(in: markdown) ?? markdown
         let labelsLongestFirst = knownLabels.filter { !$0.isEmpty }.sorted { $0.count > $1.count }
         var rows: [SpeakerVoiceprintMigrationPolicy.TranscriptRow] = []

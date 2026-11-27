@@ -24,6 +24,14 @@ enum HomeMeetingDeletion {
         let summaryURLs: [URL]
         let audioDirectoryURLs: [URL]
         let audioAttachmentIDs: [String]
+        /// `.meta/<capture_id>.json` pipeline metadata (format_version 2),
+        /// trashed and restored with its transcript.
+        var metadataSidecarURLs: [URL] = []
+
+        /// Everything the deletion moves to the Trash.
+        var trashedURLs: [URL] {
+            transcriptURLs + summaryURLs + metadataSidecarURLs + audioDirectoryURLs
+        }
     }
 
     struct UndoPayload: Sendable {
@@ -40,7 +48,7 @@ enum HomeMeetingDeletion {
         fileManager: FileManager = .default
     ) throws -> UndoPayload {
         try withCurrentPlan(for: item, fileManager: fileManager) { plan in
-            let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+            let urls = plan.trashedURLs
             let trashed = try CaptureTrashOperation.trash(urls, fileManager: fileManager)
             return UndoPayload(plan: plan, trashedFiles: trashed)
         }
@@ -76,7 +84,7 @@ enum HomeMeetingDeletion {
                     transcriptURL: current, audio: nil, speakerStatus: .ready
                 )
                 let plan = plan(for: item, fileManager: fileManager, includeDuplicates: false)
-                let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+                let urls = plan.trashedURLs
                 guard urls.allSatisfy({ canonicalPath($0).hasPrefix(root + "/") }) else {
                     throw HomeMeetingDeletionError.transcriptUnavailable
                 }
@@ -152,12 +160,33 @@ enum HomeMeetingDeletion {
             }
         }
 
+        var metadataSidecarURLs = OrderedURLSet()
+        for transcriptURL in transcriptURLs.urls {
+            if let sidecarURL = ownedMetadataSidecarURL(for: transcriptURL, fileManager: fileManager) {
+                metadataSidecarURLs.insert(sidecarURL)
+            }
+        }
+
         return Plan(
             transcriptURLs: transcriptURLs.urls,
             summaryURLs: summaryURLs.urls,
             audioDirectoryURLs: audioDirectoryURLs.urls,
-            audioAttachmentIDs: audioAttachmentIDs
+            audioAttachmentIDs: audioAttachmentIDs,
+            metadataSidecarURLs: metadataSidecarURLs.urls
         )
+    }
+
+    /// The meeting's `.meta/<capture_id>.json`, when the transcript is an
+    /// app-owned meeting and the sidecar is a regular file (not a symlink).
+    private static func ownedMetadataSidecarURL(for transcriptURL: URL, fileManager: FileManager) -> URL? {
+        guard let captureID = appOwnedMeetingTranscriptValues(transcriptURL).flatMap(TranscriptFrontmatter.captureID(in:)) else {
+            return nil
+        }
+        let url = MeetingMetadataSidecar.url(forTranscript: transcriptURL, captureID: captureID)
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values?.isRegularFile == true, values?.isSymbolicLink != true,
+              fileManager.fileExists(atPath: url.path) else { return nil }
+        return url
     }
 
     private static func duplicateRetainedAudioMeetings(

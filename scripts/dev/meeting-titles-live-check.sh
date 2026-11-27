@@ -42,6 +42,7 @@ SOURCES+=(
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesPrompt.swift"
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesGuards.swift"
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesFrontmatterWriter.swift"
+    "$ROOT_DIR/Sources/Meeting/MeetingTitlesBody.swift"
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesLabeler.swift"
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesQueue.swift"
     "$ROOT_DIR/Sources/Meeting/MeetingTitlesJob.swift"

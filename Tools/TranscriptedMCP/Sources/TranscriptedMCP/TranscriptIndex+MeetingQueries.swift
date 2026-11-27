@@ -209,9 +209,18 @@ extension TranscriptIndex {
     }
 
     private func summarySearchTitle(summaryTitle: String, filename: String) -> String {
-        let trimmed = summaryTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = summaryTitleAndProse(summaryTitle).title
         if !trimmed.isEmpty { return trimmed }
         return TranscriptLoader.fallbackMeetingTitle(forFilename: filename)
+    }
+
+    /// The indexed `title` column: the title, then the prose summary on the
+    /// next line (see `insertSummarySearchDocument`).
+    private func summaryTitleAndProse(_ column: String) -> (title: String, summary: String) {
+        let parts = column.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let title = parts.first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let summary = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return (title, summary)
     }
 
     private func summarySearchSnippets(
@@ -223,8 +232,10 @@ extension TranscriptIndex {
         openQuestions: String,
         limit: Int
     ) -> [SearchSnippet] {
+        let titleAndProse = summaryTitleAndProse(title)
         let fields: [(label: String, text: String)] = [
-            ("Title", title),
+            ("Title", titleAndProse.title),
+            ("Summary", titleAndProse.summary),
             ("Decisions", decisions),
             ("Action Items", actionItems),
             ("Open Questions", openQuestions),

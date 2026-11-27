@@ -83,12 +83,18 @@ enum HomeMeetingSpeakerRename {
                 }
                 guard !normalizedAssignments.isEmpty else { return [] }
 
-                let raw: String
+                let saved: String
                 do {
-                    raw = try String(contentsOf: url, encoding: .utf8)
+                    saved = try String(contentsOf: url, encoding: .utf8)
                 } catch {
                     throw HomeMeetingSpeakerRenameError.readFailed
                 }
+                // v2 rows (`[01:43] **You:** text`) are qualified with the
+                // frontmatter's channels first, so `**Mic/You:**` can be
+                // matched like `[Mic/You]`; the result is compacted again
+                // with the edited frontmatter (see TranscriptFrontmatterDialogue).
+                let hasDialogueRows = TranscriptFrontmatterDialogue.containsDialogueLine(saved)
+                let raw = hasDialogueRows ? TranscriptFrontmatterDialogue.qualifyingLabels(in: saved) : saved
 
                 var lines = raw.components(separatedBy: "\n")
                 var metadataChangedByID: [String: Bool] = [:]
@@ -118,11 +124,17 @@ enum HomeMeetingSpeakerRename {
                 var placeholders: [(token: String, replacement: String)] = []
                 var bodyChangedTokens: Set<String> = []
                 for (offset, pair) in replacements.sorted(by: { $0.key < $1.key }).enumerated() {
-                    guard rewritten.contains(pair.key) else { continue }
-                    let placeholder = "[TRANSCRIPTED_SPEAKER_RENAME_\(offset)_\(UUID().uuidString)]"
-                    rewritten = rewritten.replacingOccurrences(of: pair.key, with: placeholder)
-                    placeholders.append((placeholder, pair.value))
-                    bodyChangedTokens.insert(pair.key)
+                    // `[Mic/Alex]` (v1) and `**Mic/Alex:**` (v2, qualified).
+                    let forms = [
+                        (old: pair.key, new: pair.value),
+                        (old: dialogueToken(fromBracketToken: pair.key), new: dialogueToken(fromBracketToken: pair.value)),
+                    ]
+                    for (formIndex, form) in forms.enumerated() where rewritten.contains(form.old) {
+                        let placeholder = "[TRANSCRIPTED_SPEAKER_RENAME_\(offset)_\(formIndex)_\(UUID().uuidString)]"
+                        rewritten = rewritten.replacingOccurrences(of: form.old, with: placeholder)
+                        placeholders.append((placeholder, form.new))
+                        bodyChangedTokens.insert(pair.key)
+                    }
                 }
                 for placeholder in placeholders {
                     rewritten = rewritten.replacingOccurrences(
@@ -139,6 +151,9 @@ enum HomeMeetingSpeakerRename {
                     }
                 }
 
+                if hasDialogueRows {
+                    rewritten = TranscriptFrontmatterDialogue.compactingLabels(in: rewritten)
+                }
                 do {
                     try TranscriptFileRewrite.write(rewritten, to: url)
                     fileManager.restrictFileToOwnerOnly(at: url)
@@ -150,6 +165,11 @@ enum HomeMeetingSpeakerRename {
         } catch MeetingTranscriptFileUpdateError.replacementInProgress {
             throw HomeMeetingSpeakerRenameError.retranscriptionInProgress
         }
+    }
+
+    /// `[Mic/Alex]` → `**Mic/Alex:**`, the qualified v2 row label.
+    private static func dialogueToken(fromBracketToken token: String) -> String {
+        "**\(token.dropFirst().dropLast()):**"
     }
 
     private static func normalizedName(_ raw: String) -> String? {

@@ -46,9 +46,13 @@ extension TranscriptSaver {
         oldName: String,
         newName: String
     ) -> Int {
+        // v1 bracket labels and v2 bold labels (qualified by
+        // `TranscriptFrontmatterDialogue.withQualifiedLabels` before any rewrite).
         let replacements = [
             ("[\(prefix)/\(oldName)]", "[\(prefix)/\(newName)]"),
             ("[\(prefix)/[[\(oldName)]]]", "[\(prefix)/[[\(newName)]]]"),
+            ("**\(prefix)/\(oldName):**", "**\(prefix)/\(newName):**"),
+            ("**\(prefix)/[[\(oldName)]]:**", "**\(prefix)/[[\(newName)]]:**"),
         ]
         var lines = content.components(separatedBy: "\n")
         var changed = false
@@ -84,6 +88,8 @@ extension TranscriptSaver {
         let labels = [
             "[\(prefix)/\(oldName)]",
             "[\(prefix)/[[\(oldName)]]]",
+            "**\(prefix)/\(oldName):**",
+            "**\(prefix)/[[\(oldName)]]:**",
         ]
 
         return content.components(separatedBy: "\n").reduce(0) { count, line in
@@ -247,9 +253,16 @@ extension TranscriptSaver {
         let timestamp: String
         let source: String
         let label: String
+        /// Inline text of a v2 `[MM:SS] **Mic/Name:** text` row; nil for the
+        /// v1 header-then-text block.
+        let inlineText: String?
     }
 
-    /// Rewrite the styled body (`**<MM:SS>**  [<Mic|System>/<label>]` blocks).
+    /// Rewrite the styled body: v1 `**<MM:SS>**  [<Mic|System>/<label>]`
+    /// blocks or v2 `[<MM:SS>] **<Mic|System>/<label>:** text` rows (labels
+    /// arrive qualified; `withQualifiedLabels` compacts them afterwards).
+    /// A v2 row can stand for several merged same-speaker utterances; the
+    /// alignment below already allows utterances without a row.
     ///
     /// The async restyle (`MeetingTranscriptStyler`, app side) drops entries it
     /// cannot render — utterances whose text is only `**`, whose first line is
@@ -279,7 +292,8 @@ extension TranscriptSaver {
             }
 
             guard let headerIndex,
-                  let header = parseStyledTranscriptHeader(lines[headerIndex]) else {
+                  let header = parseStyledTranscriptHeader(lines[headerIndex])
+                    ?? parseQualifiedDialogueRow(lines[headerIndex]) else {
                 // Not a row (the empty-transcript placeholder, a preserved
                 // trailing section, ...): keep it verbatim. If it still reads
                 // like a row we could not parse, skipping it would leave a stale
@@ -291,7 +305,9 @@ extension TranscriptSaver {
             // One row per block. A second header folded into this block (lost
             // blank-line separator) would otherwise keep its old label.
             let foldedHeader = lines.indices.contains { index in
-                index != headerIndex && parseStyledTranscriptHeader(lines[index]) != nil
+                index != headerIndex
+                    && (parseStyledTranscriptHeader(lines[index]) != nil
+                        || parseQualifiedDialogueRow(lines[index]) != nil)
             }
             guard !foldedHeader else { return false }
 
@@ -300,7 +316,8 @@ extension TranscriptSaver {
                 lineIndex: headerIndex,
                 timestamp: header.timestamp,
                 source: header.source,
-                label: header.label
+                label: header.label,
+                inlineText: header.inlineText
             ))
         }
 
@@ -337,7 +354,15 @@ extension TranscriptSaver {
                 obsidianEnabled: obsidianEnabled
             )
             var lines = chunks[row.chunkIndex].components(separatedBy: "\n")
-            lines[row.lineIndex] = "**\(row.timestamp)**  [\(row.source)/\(label)]"
+            if let inlineText = row.inlineText {
+                lines[row.lineIndex] = TranscriptFrontmatterDialogue.render(
+                    timestamp: row.timestamp,
+                    label: "\(row.source)/\(label)",
+                    text: inlineText
+                )
+            } else {
+                lines[row.lineIndex] = "**\(row.timestamp)**  [\(row.source)/\(label)]"
+            }
             chunks[row.chunkIndex] = lines.joined(separator: "\n")
         }
 
@@ -415,7 +440,8 @@ extension TranscriptSaver {
     /// True when `line` carries a `[Mic/...]` / `[System/...]` label right after
     /// a bare timestamp (raw or styled), i.e. it reads like a transcript row.
     private static func looksLikeTranscriptRowLine(_ line: String) -> Bool {
-        ["[Mic/", "[System/"].contains { marker in
+        if TranscriptFrontmatterDialogue.parseLine(line) != nil { return true }
+        return ["[Mic/", "[System/", "**Mic/", "**System/"].contains { marker in
             guard let markerRange = line.range(of: marker) else { return false }
             return isTranscriptLabelPrefix(line[..<markerRange.lowerBound])
         }
@@ -471,7 +497,9 @@ extension TranscriptSaver {
 
     private static let styledHeaderRegex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#)
 
-    private static func parseStyledTranscriptHeader(_ line: String) -> (timestamp: String, source: String, label: String)? {
+    private static func parseStyledTranscriptHeader(
+        _ line: String
+    ) -> (timestamp: String, source: String, label: String, inlineText: String?)? {
         let normalizedHeader = line
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -493,7 +521,16 @@ extension TranscriptSaver {
 
         let source = String(sourceLabel[..<separator])
         let label = String(sourceLabel[sourceLabel.index(after: separator)...])
-        return (timestamp, source, label)
+        return (timestamp, source, label, nil)
+    }
+
+    /// A v2 row after qualification: `[<ts>] **<Mic|System>/<label>:** text`.
+    private static func parseQualifiedDialogueRow(
+        _ line: String
+    ) -> (timestamp: String, source: String, label: String, inlineText: String?)? {
+        guard let row = TranscriptFrontmatterDialogue.parseLine(line),
+              let qualifier = row.qualifier else { return nil }
+        return (row.timestamp, qualifier.labelPrefix, row.name, row.text)
     }
 
     private static func transcriptLabel(

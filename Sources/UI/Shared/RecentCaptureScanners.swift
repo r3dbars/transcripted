@@ -209,7 +209,8 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 
     static func transcriptSpeakerLabels(in markdown: String) -> [String] {
-        markdown
+        // v2 rows get their `Mic/` / `System/` channel from the frontmatter.
+        TranscriptFrontmatterDialogue.bracketedLines(in: markdown)
             .components(separatedBy: .newlines)
             .compactMap { speakerLabel(fromTranscriptLine: $0) }
     }

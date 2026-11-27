@@ -22,6 +22,9 @@ swiftc \
   "$ROOT_DIR/Sources/Meeting/MeetingTitlesDisplay.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingTranscriptDialogue.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingTranscriptV2Frontmatter.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingMetadataSidecar.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerProfile.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerNamingTier.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift" \
@@ -29,6 +32,7 @@ swiftc \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Services/DiarizationBackend.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
+  "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatterDialogue.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFileRewrite.swift" \
   "$ROOT_DIR/Sources/UI/Shared/MeetingAudioArchiveResolver.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentCaptureScanners.swift" \

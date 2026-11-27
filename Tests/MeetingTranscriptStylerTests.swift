@@ -120,8 +120,8 @@ private func testMeetingTranscriptStylerRewritesTranscriptStyleMarker() {
     let updated = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
 
     assertTrue(
-        updated.contains("format_version: 1"),
-        "Restyling must preserve the format_version frontmatter key"
+        updated.contains("format_version: 2") && !updated.contains("format_version: 1"),
+        "Restyling must mark the v2 body grammar with format_version: 2"
     )
     assertTrue(
         updated.contains("transcript_style: styled"),
@@ -145,9 +145,10 @@ private func testMeetingTranscriptStylerRewritesTranscriptStyleMarker() {
         1,
         "Repeated restyle passes must keep a single transcript_style key"
     )
-    assertTrue(
-        secondUpdated.contains("format_version: 1"),
-        "Repeated restyle passes must keep the format_version key"
+    assertEqual(
+        secondUpdated.components(separatedBy: "format_version:").count - 1,
+        1,
+        "Repeated restyle passes must keep a single format_version key"
     )
 }
 
@@ -161,9 +162,9 @@ private func testMeetingTranscriptStylerLeavesLegacyFilesWithoutFormatVersion() 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
     let updated = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
 
-    assertFalse(
-        updated.contains("format_version:"),
-        "Restyling a pre-versioning transcript must not invent a format_version"
+    assertTrue(
+        updated.contains("format_version: 2"),
+        "A restyled pre-versioning transcript carries the v2 body, so it says format_version: 2"
     )
     assertTrue(
         updated.contains("transcript_style: styled"),
@@ -454,7 +455,7 @@ private func testMeetingTranscriptStylerSerializesAgainstStaleWholeFileWriters()
     )
     let finalMarkdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
     assertTrue(
-        finalMarkdown.contains("[System/Alex]"),
+        finalMarkdown.contains("**Alex:**") && !finalMarkdown.contains("Jamie"),
         "The stale snapshot must not overwrite the canonical transcript"
     )
 }
@@ -662,7 +663,7 @@ private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
     let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
 
-    assertTrue(updatedMarkdown?.contains("[System/[[Alex]]]") == true, "Styler should preserve Obsidian speaker links")
+    assertTrue(updatedMarkdown?.contains("[00:04] **[[Alex]]:** Linked speaker text") == true, "Styler should preserve Obsidian speaker links")
     assertTrue(updatedMarkdown?.contains("Linked speaker text should stay intact.") == true, "Styler should keep the transcript text attached to the right speaker")
 }
 

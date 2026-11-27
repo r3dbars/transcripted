@@ -363,6 +363,10 @@ struct HomeMeetingPreviewContent {
     let transcriptLines: [HomeMeetingTranscriptLine]
 
     static func make(from markdown: String) -> HomeMeetingPreviewContent {
+        // v2 rows (`[01:43] **You:** text`) carry no channel; read them as
+        // raw `[01:43] [Mic/You] text` rows with the channel from the
+        // frontmatter, so identities and renames work the same for v1 and v2.
+        let markdown = TranscriptFrontmatterDialogue.bracketedLines(in: markdown)
         let readableLines = readableMarkdownLines(from: markdown)
         let speakers = frontmatterSpeakers(from: markdown)
         return HomeMeetingPreviewContent(
@@ -654,9 +658,10 @@ struct HomeMeetingPreviewContent {
 
 struct HomeMeetingTranscriptLine: Equatable {
     /// The transcript renders this clock string, and clicking it plays the
-    /// meeting audio from there when audio was kept. Speaker review can
-    /// separately use it to bound a retained-audio sample; rows never follow
-    /// or highlight the playhead.
+    /// meeting audio from there when audio was kept. The transcript follows
+    /// playback by these start times (and pauses following while the reader
+    /// scrolls). Speaker review can separately use it to bound a
+    /// retained-audio sample.
     let time: String
     let identity: HomeMeetingSpeakerIdentity
     let text: String

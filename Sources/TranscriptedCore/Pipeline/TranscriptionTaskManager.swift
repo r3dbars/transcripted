@@ -636,7 +636,7 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        if let transcriptId = values["transcript_id"] {
+        if let transcriptId = values["transcript_id"] ?? values["capture_id"] {
             let parsedTranscriptId = UUID(uuidString: transcriptId)
             lastSavedTranscriptId = parsedTranscriptId
             if taskId == nil, let parsedTranscriptId {

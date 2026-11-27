@@ -344,6 +344,9 @@ enum SpeakerReviewQueueScanner {
         let meetingDuration = TranscriptFrontmatter.durationSeconds(from: document.values["duration"])
         let pendingSpeakers = frontmatterSpeakers(from: document.lines).filter { $0.source == "db_pending" }
         let transcriptLines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        // v2 rows as `[MM:SS] [Mic/Name] text`, so the label search below finds them.
+        let bracketedBody = TranscriptFrontmatter.body(in: TranscriptFrontmatterDialogue.bracketedLines(in: markdown))
+            ?? document.body
         let meetingDurationSeconds = meetingDuration.map(TimeInterval.init)
 
         return PendingSummary(
@@ -378,7 +381,7 @@ enum SpeakerReviewQueueScanner {
                 return PendingSummary.Speaker(
                     speaker: speaker,
                     sampleText: quoteSample.flatMap { cleanedSample($0.line.text) }
-                        ?? sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
+                        ?? sampleText(in: bracketedBody, speakerName: speaker.name, channel: speaker.channel),
                     mixedWindow: sampleWindow(from: mixedSample?.mixedWindow),
                     channelWindow: sampleWindow(from: channelSample?.channelWindow)
                 )

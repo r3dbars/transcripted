@@ -108,7 +108,18 @@ extension MeetingSessionController {
             let frontmatterValues = transcriptURL.flatMap {
                 (try? TranscriptFrontmatter.readValues(from: $0)) ?? nil
             }
-            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(values: frontmatterValues)
+            // Format 2 keeps `mic_speakers` in the `.meta` sidecar; counts only.
+            let sidecarCounts = transcriptURL.flatMap { url in
+                TranscriptFrontmatter.captureID(in: frontmatterValues ?? [:]).flatMap {
+                    MeetingMetadataSidecar.read(forTranscript: url, captureID: $0)
+                }
+            }
+            var countValues = frontmatterValues
+            if countValues?["mic_speakers"] == nil,
+               case .string(let micSpeakers)? = sidecarCounts?.frontmatter["mic_speakers"] {
+                countValues?["mic_speakers"] = micSpeakers
+            }
+            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(values: countValues)
             let autoRecognitionEvents = Self.autoRecognitionAnalyticsProperties(
                 frontmatterValues: frontmatterValues,
                 speakerDatabase: speakerDatabase

@@ -186,10 +186,11 @@ enum MeetingTranscriptStyler {
         let renderedFrontmatter = renderFrontmatter(
             lines: document.frontmatterLines,
             title: title,
-            keepsWriterTitleLine: document.explicitTitle?.isEmpty == false
+            keepsWriterTitleLine: document.explicitTitle?.isEmpty == false,
+            recordedAt: document.recordedAt
         )
         let body = renderBody(document: document, title: title)
-        let updated = renderedFrontmatter + "\n\n" + body + "\n"
+        let updated = renderedFrontmatter.text + "\n\n" + body + "\n"
         let renameOutcome = renameTranscriptArtifactsIfNeeded(
             at: url,
             title: title,
@@ -202,6 +203,13 @@ enum MeetingTranscriptStyler {
             do {
                 try TranscriptFileRewrite.write(updated, to: finalURL)
                 FileManager.default.restrictFileToOwnerOnly(at: finalURL)
+                if let captureID = renderedFrontmatter.captureID {
+                    MeetingMetadataSidecar.merge(
+                        renderedFrontmatter.movedValues,
+                        forTranscript: finalURL,
+                        captureID: captureID
+                    )
+                }
             } catch {
                 logFailure(
                     event: "meeting_transcript_write_failed",
@@ -266,11 +274,15 @@ enum MeetingTranscriptStyler {
         let values = frontmatter.values
 
         let recordedAt = parseRecordedAt(values: values, fallbackURL: fallbackURL)
-        let transcriptEntries = extractTranscriptEntries(from: frontmatter.body)
+        let speakerChannels = TranscriptFrontmatterDialogue.speakerChannels(fromFrontmatterLines: frontmatter.lines)
+        let transcriptEntries = extractTranscriptEntries(from: frontmatter.body, channels: speakerChannels)
 
         let duration = values["duration"] ?? "0:00"
         let words = Int(values["total_word_count"] ?? "") ?? 0
-        let utterances = (Int(values["mic_utterances"] ?? "") ?? 0) + (Int(values["system_utterances"] ?? "") ?? 0)
+        // v2 files keep utterance counts in the sidecar; count turns instead.
+        let utterances = values["mic_utterances"] == nil && values["system_utterances"] == nil
+            ? transcriptEntries.count
+            : (Int(values["mic_utterances"] ?? "") ?? 0) + (Int(values["system_utterances"] ?? "") ?? 0)
 
         return ParsedDocument(
             frontmatterLines: frontmatter.lines,
@@ -282,6 +294,8 @@ enum MeetingTranscriptStyler {
             totalUtterances: utterances,
             microphoneAudioUnusable: values["microphone_audio_unusable"] == "true",
             transcriptEntries: transcriptEntries,
+            speakerChannels: speakerChannels,
+            preservedSummarySection: summarySection(in: frontmatter.body),
             preservedTrailingSections: trailingBodySections(in: frontmatter.body)
         )
     }
@@ -325,13 +339,16 @@ enum MeetingTranscriptStyler {
         return resourceValues?.creationDate ?? resourceValues?.contentModificationDate ?? Date()
     }
 
-    private static func extractTranscriptEntries(from body: String) -> [TranscriptEntry] {
+    private static func extractTranscriptEntries(
+        from body: String,
+        channels: TranscriptFrontmatterDialogue.SpeakerChannels
+    ) -> [MeetingTranscriptTurn] {
         for block in transcriptBlocks(in: body) {
-            let entries = parseTranscriptEntries(from: block)
+            let entries = parseTranscriptEntries(from: block, channels: channels)
             if !entries.isEmpty { return entries }
         }
 
-        return parseTranscriptEntries(from: body.trimmingCharacters(in: .whitespacesAndNewlines))
+        return parseTranscriptEntries(from: body.trimmingCharacters(in: .whitespacesAndNewlines), channels: channels)
     }
 
     private static func transcriptBlocks(in body: String) -> [String] {
@@ -348,6 +365,21 @@ enum MeetingTranscriptStyler {
             blocks.append(String(remaining[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return blocks
+    }
+
+    /// The on-device `## Summary` section (`MeetingTitlesFrontmatterWriter`),
+    /// when it sits before the transcript, so a second restyle keeps it.
+    private static func summarySection(in body: String) -> String? {
+        let normalized = "\n" + body
+        guard let start = normalized.range(of: "\n## Summary\n") else { return nil }
+        let transcriptStart = ["\n## Transcript\n", "\n## Full Transcript\n"]
+            .compactMap { normalized.range(of: $0)?.lowerBound }
+            .min()
+        if let transcriptStart, transcriptStart < start.lowerBound { return nil }
+        let remaining = normalized[start.upperBound...]
+        let end = remaining.range(of: "\n## ")?.lowerBound ?? remaining.endIndex
+        let text = remaining[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : "## Summary\n\n\(text)"
     }
 
     /// Keep unknown sections after the transcript intact. Older meeting files
@@ -390,28 +422,37 @@ enum MeetingTranscriptStyler {
             }
     }
 
+    private struct RenderedFrontmatter {
+        let text: String
+        let movedValues: [String: MeetingMetadataSidecar.Value]
+        let captureID: UUID?
+    }
+
     private static func renderFrontmatter(
         lines: [String],
         title: String,
-        keepsWriterTitleLine: Bool
-    ) -> String {
-        // Preserve every writer key except `title:` (re-emitted first: the
-        // writer's line verbatim for a saved title, else the generated title)
-        // and `transcript_style:`. The persisted restyle rewrites
-        // the body into the styled grammar, so the style marker is replaced with
-        // `styled` — filter-then-append keeps it from duplicating on repeat
-        // passes. `format_version` passes through untouched.
+        keepsWriterTitleLine: Bool,
+        recordedAt: Date
+    ) -> RenderedFrontmatter {
+        // `title:` comes first: the writer's line verbatim for a saved title,
+        // else the generated title. The body is now in the v2 grammar, so the
+        // header says `format_version: 2` and `transcript_style: styled`
+        // (filter-then-emit keeps them from duplicating on repeat passes).
+        // Unknown keys pass through; pipeline plumbing and healthy defaults
+        // move to the `.meta/<capture_id>.json` sidecar.
         // See docs/capture-format.md.
-        var filtered = lines.filter { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return !trimmed.hasPrefix("title:") && !trimmed.hasPrefix("transcript_style:")
-        }
-        filtered.append("transcript_style: styled")
-        let titleLine = keepsWriterTitleLine ? writerTitleLine(in: lines) : nil
-        return ([
-            "---",
-            titleLine ?? "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
-        ] + filtered + ["---"]).joined(separator: "\n")
+        let titleLine = (keepsWriterTitleLine ? writerTitleLine(in: lines) : nil)
+            ?? "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
+        let output = MeetingTranscriptV2Frontmatter.render(
+            lines: lines,
+            titleLine: titleLine,
+            recordedAt: recordedAt
+        )
+        return RenderedFrontmatter(
+            text: (["---"] + output.lines + ["---"]).joined(separator: "\n"),
+            movedValues: output.movedValues,
+            captureID: output.captureID
+        )
     }
 
     private static func renderBody(document: ParsedDocument, title: String) -> String {
@@ -422,18 +463,14 @@ enum MeetingTranscriptStyler {
         if document.totalWords > 0 {
             detailParts.append("\(document.totalWords) \(document.totalWords == 1 ? "word" : "words")")
         }
-        if document.totalUtterances > 0 {
-            detailParts.append("\(document.totalUtterances) \(document.totalUtterances == 1 ? "turn" : "turns")")
+        let turns = MeetingTranscriptDialogue.merged(document.transcriptEntries)
+        if !turns.isEmpty {
+            detailParts.append("\(turns.count) \(turns.count == 1 ? "turn" : "turns")")
         }
 
-        let transcriptBlock = document.transcriptEntries.isEmpty
+        let transcriptBlock = turns.isEmpty
             ? emptyTranscriptPlaceholder
-            : document.transcriptEntries.map { entry in
-                """
-                **\(entry.timestamp)**  [\(entry.label)]
-                \(entry.text)
-                """
-            }.joined(separator: "\n\n")
+            : MeetingTranscriptDialogue.render(turns, channels: document.speakerChannels)
 
         var rendered = """
         # \(title)
@@ -442,6 +479,9 @@ enum MeetingTranscriptStyler {
         """
         if document.microphoneAudioUnusable {
             rendered += "\n\n> **Recording note:** The microphone track was missing or could not be transcribed, so this meeting contains system audio only."
+        }
+        if let summary = document.preservedSummarySection {
+            rendered += "\n\n\(summary)"
         }
         rendered += """
 
@@ -494,8 +534,8 @@ enum MeetingTranscriptStyler {
     private static func ruleTitle(for document: ParsedDocument) -> String {
         let namedRemoteParticipants = Array(
             LinkedSet(document.transcriptEntries.compactMap { entry -> String? in
-                guard entry.label.hasPrefix("System/") else { return nil }
-                let name = String(entry.label.dropFirst("System/".count))
+                guard entry.channel == .system else { return nil }
+                let name = entry.name
                 guard !name.hasPrefix("Speaker "), name != "Remote", !name.isEmpty else { return nil }
                 return name
             }).elements
@@ -528,15 +568,18 @@ enum MeetingTranscriptStyler {
         }
     }
 
-    private static func parseTranscriptEntries(from block: String) -> [TranscriptEntry] {
+    private static func parseTranscriptEntries(
+        from block: String,
+        channels: TranscriptFrontmatterDialogue.SpeakerChannels
+    ) -> [MeetingTranscriptTurn] {
         let chunks = block
             .components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        var entries: [TranscriptEntry] = []
+        var entries: [MeetingTranscriptTurn] = []
         for chunk in chunks {
-            if let entry = parseTranscriptEntry(from: chunk) {
+            if let entry = parseTranscriptEntry(from: chunk, channels: channels) {
                 entries.append(entry)
             }
         }
@@ -545,13 +588,24 @@ enum MeetingTranscriptStyler {
 
     private static let transcriptTimestampRegex = try? NSRegularExpression(pattern: #"^\[?([0-9:]+)\]?\s+"#)
 
-    private static func parseTranscriptEntry(from chunk: String) -> TranscriptEntry? {
+    private static func parseTranscriptEntry(
+        from chunk: String,
+        channels: TranscriptFrontmatterDialogue.SpeakerChannels
+    ) -> MeetingTranscriptTurn? {
         let lines = chunk
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
         guard let firstLine = lines.first else { return nil }
+        // v2 `[MM:SS] **Speaker:** text`, so a second restyle reads its own output.
+        if TranscriptFrontmatterDialogue.parseLine(firstLine) != nil {
+            return MeetingTranscriptDialogue.turn(
+                fromDialogueLine: firstLine,
+                continuation: Array(lines.dropFirst()),
+                channels: channels
+            )
+        }
         let normalizedHeader = firstLine
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -581,7 +635,7 @@ enum MeetingTranscriptStyler {
         let textLines = (inlineTail.isEmpty ? Array(lines.dropFirst()) : [inlineTail] + Array(lines.dropFirst()))
         let text = textLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        return TranscriptEntry(timestamp: timestamp, label: label, text: text)
+        return MeetingTranscriptDialogue.turn(timestamp: timestamp, qualifiedLabel: label, text: text)
     }
 
     private static func parseBracketedSpeakerLabel(in value: String) -> (label: String, tail: String)? {
@@ -709,14 +763,10 @@ private struct ParsedDocument {
     let totalWords: Int
     let totalUtterances: Int
     let microphoneAudioUnusable: Bool
-    let transcriptEntries: [TranscriptEntry]
+    let transcriptEntries: [MeetingTranscriptTurn]
+    let speakerChannels: TranscriptFrontmatterDialogue.SpeakerChannels
+    let preservedSummarySection: String?
     let preservedTrailingSections: String?
-}
-
-private struct TranscriptEntry {
-    let timestamp: String
-    let label: String
-    let text: String
 }
 
 private struct LinkedSet<Element: Hashable> {
