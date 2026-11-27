@@ -1,13 +1,15 @@
 import AppKit
 import SwiftUI
 
-// Dictations page cards (2026-10 redesign).
+// Dictations page cards (2026-11 unified matte editorial pass).
 //
 // The daily `Dictations_YYYY-MM-DD.md` file stays the storage shape (see
-// `Sources/Dictation/AGENTS.md`); the page shows one card per entry. The bar
-// on top carries play, time, length, words, app, and any delivery problem
-// (`DictationPlaybackBar.swift`); the dictated text sits below in italics,
-// clamped to four lines with Show more. Copy and ⋯ fade in on hover.
+// `Sources/Dictation/AGENTS.md`); the page shows one borderless matte card per
+// entry, sharing `HomeMeetingCardSurface` and `HomeMeetingRowLayout` with
+// Meetings. The dictated words sit on top in clean upright ink (clamped to four
+// lines with Show more); the quiet metadata, Copy / ⋯ (on hover), and neutral
+// play button sit below, expanding a recessed milled mini rail while playing
+// (`DictationPlaybackBar.swift`).
 
 /// Stable `CaptureUndoManager` ids for dictation entries. The prefix keeps
 /// dictation offers distinguishable from meeting offers (whose ids are raw
@@ -51,8 +53,10 @@ enum QuietDictationLibraryFormatting {
 
 // MARK: - Card
 
-/// One saved dictation. The bar sits on top; the text below is italic,
-/// clamped to four lines, with a tiny Show more toggle when it runs longer.
+/// One saved dictation on the same borderless matte card surface as Meetings:
+/// upright dictated words on top (clamped to four lines with Show more), quiet
+/// metadata and neutral controls below, and a recessed milled mini rail while
+/// playing.
 struct QuietDictationCard: View {
     let entry: SavedDictationEntry
     let isCopied: Bool
@@ -80,6 +84,10 @@ struct QuietDictationCard: View {
         fullHeight > clampedHeight + 1
     }
 
+    private var isActivePlayback: Bool {
+        playback.isActive(entry.id)
+    }
+
     private var metadata: [DictationCardFormatting.MetadataItem] {
         DictationCardFormatting.metadata(
             time: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt),
@@ -91,46 +99,54 @@ struct QuietDictationCard: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: HomeMeetingRowLayout.cardRadius, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
-            DictationCardBar(
-                entryID: entry.id,
-                metadata: metadata,
-                hasAudio: audioInfo?.isAvailable == true,
-                isCheckingAudio: entry.audioRelativePath != nil && audioInfo == nil,
-                isTranscribingAgain: isTranscribingAgain,
-                showsActions: isHovering || playback.isActive(entry.id),
-                isCopied: isCopied,
-                menuItems: menuItems,
-                playback: playback,
-                onTogglePlayback: onTogglePlayback,
-                onCopy: onCopy
-            )
-
             if !text.isEmpty {
                 bodyText
-                    .padding(.top, 8)
             }
 
             if isLong || isExpanded {
                 showMoreButton
                     .padding(.top, 6)
             }
+
+            DictationCardBar(
+                entryID: entry.id,
+                metadata: metadata,
+                hasAudio: audioInfo?.isAvailable == true,
+                isCheckingAudio: entry.audioRelativePath != nil && audioInfo == nil,
+                isTranscribingAgain: isTranscribingAgain,
+                showsActions: isHovering || isActivePlayback,
+                isCopied: isCopied,
+                menuItems: menuItems,
+                playback: playback,
+                onTogglePlayback: onTogglePlayback,
+                onCopy: onCopy
+            )
+            .padding(.top, text.isEmpty ? 0 : 10)
+
+            if isActivePlayback {
+                DictationInlinePlayer(entryID: entry.id, playback: playback)
+                    .padding(.top, 10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(EdgeInsets(top: 10, leading: 14, bottom: 12, trailing: 14))
+        .padding(HomeMeetingRowLayout.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .fill(LibraryTokens.raisedFill)
+            shape
+                .fill(isHovering || isActivePlayback ? HomeMeetingCardSurface.liftedFill : HomeMeetingCardSurface.fill)
+                .shadow(
+                    color: isActivePlayback ? HomeMeetingCardSurface.openShadow : HomeMeetingCardSurface.shadow,
+                    radius: isActivePlayback ? 12 : 1,
+                    y: isActivePlayback ? 6 : 1
+                )
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(isHovering ? Color.primary.opacity(0.16) : LibraryTokens.raisedStroke, lineWidth: 1)
-        )
-        .padding(.vertical, 4)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
-        }
+        .padding(.bottom, HomeMeetingRowLayout.cardSpacing)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHovering)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isActivePlayback)
+        .onHover { isHovering = $0 }
         .task(id: entry.id) {
             await onLoadAudioInfo()
         }
@@ -166,9 +182,9 @@ struct QuietDictationCard: View {
 
     private var styledText: some View {
         Text(text)
-            .font(.system(size: 13.5).italic())
-            .foregroundStyle(.secondary)
-            .lineSpacing(5)
+            .font(LibraryTokens.body)
+            .foregroundStyle(LibraryTokens.ink)
+            .lineSpacing(4.5)
     }
 
     private var showMoreButton: some View {

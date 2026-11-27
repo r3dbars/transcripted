@@ -6,7 +6,7 @@ import SwiftUI
 // elapsed and total time (plus the Mix / You / Others picker when the
 // meeting kept split tracks). Playback runs through
 // `MeetingAudioPlayback.shared`, and transcript lines still play from their
-// time. Rows never follow the playhead.
+// time. Unified transcript rows follow playback and pause auto-follow on scroll.
 
 /// The round play/pause: drawn at 22 pt, hit at 40 pt. A closed row draws a
 /// quiet outline; the opened card draws it filled. Playing is filled ink
