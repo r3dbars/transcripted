@@ -32,6 +32,7 @@
   <a href="https://github.com/r3dbars/transcripted/releases/latest"><img src="https://img.shields.io/github/v/release/r3dbars/transcripted?label=release&color=6e7781" alt="Latest release"></a>
   <a href="#install"><img src="https://img.shields.io/badge/macOS_26%2B-Apple_silicon-6e7781?logo=apple&logoColor=white" alt="macOS 26 or later on Apple silicon"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3da639" alt="MIT license"></a>
+  <a href="https://glama.ai/mcp/servers/r3dbars/transcripted"><img src="https://glama.ai/mcp/servers/r3dbars/transcripted/badges/score.svg" alt="r3dbars/transcripted MCP server"></a>
 </p>
 
 <p align="center">
