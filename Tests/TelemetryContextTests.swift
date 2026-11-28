@@ -46,4 +46,24 @@ func testTelemetryContext() {
         assertEqual(properties["trigger"], "unknown", "free text never becomes a trigger")
         assertEqual(properties["failure_kind"], "dictation_start_failed", "failure fallback is a code")
     }
+    runSuite("Capture-stop events keep a categorical stop_cause") {
+        let tagged = TelemetryContext.enrich(
+            event: "meeting_capture_stopped_under_controller",
+            properties: ["stop_cause": "mic_write_failed"],
+            environment: permissions
+        )
+        assertEqual(tagged["stop_cause"], "mic_write_failed")
+        let empty = TelemetryContext.enrich(
+            event: "meeting_capture_stopped_under_controller",
+            properties: ["stop_cause": ""],
+            environment: permissions
+        )
+        assertEqual(empty["stop_cause"], "unrecorded", "empty must not ship as a blank tag")
+        let junk = TelemetryContext.enrich(
+            event: "meeting_recording_stopped",
+            properties: ["stop_cause": "Private meeting title"],
+            environment: permissions
+        )
+        assertEqual(junk["stop_cause"], "unrecorded")
+    }
 }

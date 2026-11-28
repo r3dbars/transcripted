@@ -77,10 +77,21 @@ extension Audio {
         remainingRecoveryWaits: Int,
         applyRecovery: Bool = true
     ) -> MicEngineConfigurationChangePolicy.Decision? {
-        let (matchesPublished, changedEngineIsRunning) = withAudioGraphLock {
+        let expectedRate = monoOutputFormat?.sampleRate
+        let (matchesPublished, changedEngineIsRunning, liveFormatMatchesRecording) = withAudioGraphLock {
             guard let published = engine, ObjectIdentifier(published) == changedEngineID
-            else { return (false, false) }
-            return (true, published.isRunning)
+            else { return (false, false, true) }
+            guard let inputNode else {
+                return (true, published.isRunning, true)
+            }
+            let current = recordingFormat(
+                for: inputNode,
+                voiceProcessingEnabled: voiceProcessingEnabled
+            )
+            let matches = expectedRate.map {
+                MicWriteFormatPolicy.ratesMatch($0, current.sampleRate)
+            } ?? true
+            return (true, published.isRunning, matches)
         }
         guard matchesPublished else {
             // A route change on the graph a recovery is still building fires
@@ -108,6 +119,7 @@ extension Audio {
                 before: bufferCountAtChange,
                 after: micBufferCount
             ),
+            liveFormatMatchesRecording: liveFormatMatchesRecording,
             secondsSinceLastRecoveryEnded: lastRecoveryEndTime.map {
                 Date().timeIntervalSince($0)
             },
@@ -134,7 +146,13 @@ extension Audio {
         case .engineStillRunning:
             AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
         case .recover:
-            AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
+            if changedEngineIsRunning, !liveFormatMatchesRecording {
+                AppLogger.audioMic.warning(
+                    "Audio route change left the mic running at a format the recording file cannot take; recovering onto a new segment"
+                )
+            } else {
+                AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
+            }
             if applyRecovery { recoverFromDeviceChange(sessionGeneration: sessionGeneration) }
         }
         return decision

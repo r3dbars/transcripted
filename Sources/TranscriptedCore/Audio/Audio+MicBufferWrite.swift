@@ -230,6 +230,27 @@ extension Audio {
                     by: sessionGeneration
                   ) else { return }
 
+            let bufferFormat = bufferForAsyncUse.format
+            let fileFormat = audioFile.processingFormat
+            switch MicWriteFormatPolicy.decision(
+                bufferSampleRate: bufferFormat.sampleRate,
+                bufferChannelCount: bufferFormat.channelCount,
+                tapSampleRate: monoFormat.sampleRate,
+                tapChannelCount: inputChannelCount,
+                fileSampleRate: fileFormat.sampleRate,
+                fileChannelCount: fileFormat.channelCount
+            ) {
+            case .dropStale:
+                // Recovery already replaced the writer. An in-flight buffer
+                // from the old tap cannot go in the new file.
+                return
+            case .recover:
+                self.recoverFromMicFormatMismatch(generation: sessionGeneration)
+                return
+            case .write:
+                break
+            }
+
             do {
                 if inputChannelCount > 1 {
                     guard let monoBuffer = self.manualDownmix(buffer: bufferForAsyncUse, to: monoFormat) else {
@@ -242,8 +263,42 @@ extension Audio {
                 }
                 self.recordMicWriteSuccess(generation: sessionGeneration)
             } catch {
+                // Format/rate changes can still throw from write (-50 / 'fmt?')
+                // when a field the policy did not compare moved. Recover the
+                // tap instead of counting that toward the fatal write cap.
+                if MicWriteFormatPolicy.isFormatMismatchError(error) {
+                    self.recoverFromMicFormatMismatch(generation: sessionGeneration)
+                    return
+                }
                 self.recordMicWriteFailure(error, generation: sessionGeneration)
             }
+        }
+    }
+
+    /// Restarts the mic onto a new segment because the live tap's format no
+    /// longer matches the recording file. Must not run on `micAudioFileQueue`:
+    /// `recoverFromDeviceChange` waits on that queue. A test handler stands
+    /// in so AudioTests never build an engine or touch `inputNode` (AirPods
+    /// as the default input would flip into call mode).
+    func recoverFromMicFormatMismatch(generation: UInt64) {
+        recordMicWriteSuccess(generation: generation)
+        if let handler = micFormatRecoveryHandlerForTesting {
+            handler(generation)
+            return
+        }
+        guard !isMicRecovering else { return }
+        guard recoveryAttemptCount < maxRecoveryAttempts else {
+            AppLogger.audioMic.warning(
+                "Mic write format mismatch after recovery budget spent; dropping the buffer and leaving the mic to the watchdog"
+            )
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            AppLogger.audioMic.warning(
+                "Mic write format no longer matches the recording file; recovering onto a new segment"
+            )
+            self.recoverFromDeviceChange(sessionGeneration: generation)
         }
     }
 
@@ -264,6 +319,9 @@ extension Audio {
         generation: UInt64? = nil
     ) -> Bool {
         let generation = generation ?? recordingSessionGeneration
+        // A format-mismatch recovery is already swapping the writer. Errors
+        // from the outgoing tap must not trip the cap and end the meeting.
+        guard !isMicRecovering else { return false }
         guard let count = incrementMicWriteError(generation: generation) else {
             return false
         }

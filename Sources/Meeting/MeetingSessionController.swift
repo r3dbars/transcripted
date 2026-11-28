@@ -405,6 +405,10 @@ extension MeetingSessionController {
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         let micBoostOutcome = micBoostPromptOutcomeForSavedCapture()
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostOutcome.rawValue
+        stopCaptureDiagnostics["stop_cause"] = MeetingCaptureStopCause.requested(
+            internalCause: capture.internalStopCause,
+            reason: reason.rawValue
+        )
         var finalizedHealthInfo = recordingSnapshot.healthInfo
         if systemAudioSkippedByChoice {
             finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioSkippedByChoice()
@@ -444,7 +448,11 @@ extension MeetingSessionController {
                 "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
                 "quality_reason": finalizedHealthInfo.qualityReason.rawValue,
                 "audio_gaps": "\(finalizedHealthInfo.audioGaps)",
-                "device_switches": "\(finalizedHealthInfo.deviceSwitches)"
+                "device_switches": "\(finalizedHealthInfo.deviceSwitches)",
+                "stop_cause": MeetingCaptureStopCause.requested(
+                    internalCause: capture.internalStopCause,
+                    reason: reason.rawValue
+                ),
             ],
             uniquingKeysWith: { _, new in new }
         )
@@ -469,6 +477,10 @@ extension MeetingSessionController {
                     "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
                     "route_change_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.deviceSwitches),
+                    "stop_cause": MeetingCaptureStopCause.requested(
+                        internalCause: capture.internalStopCause,
+                        reason: reason.rawValue
+                    ),
                     "system_stream_present": boolString(stopResult.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "trigger": recordingSnapshot.trigger.rawValue,
@@ -528,6 +540,10 @@ extension MeetingSessionController {
                     extra: [
                         "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
+                        "stop_cause": MeetingCaptureStopCause.requested(
+                            internalCause: capture.internalStopCause,
+                            reason: reason.rawValue
+                        ),
                         "preserved_for_retry": boolString(preserved)
                     ]
                 )
@@ -559,6 +575,10 @@ extension MeetingSessionController {
                     extra: [
                         "capture_outcome": captureOutcome,
                         "reason": reason.rawValue,
+                        "stop_cause": MeetingCaptureStopCause.requested(
+                            internalCause: capture.internalStopCause,
+                            reason: reason.rawValue
+                        ),
                         "system_file_present": boolString(false),
                         "preserved_for_retry": boolString(preserved)
                     ]
@@ -707,7 +727,7 @@ extension MeetingSessionController {
                 "failure_kind": files.micURL == nil && files.systemURL == nil ? "no_audio" : "unexpected_capture_stop",
                 "failure_stage": "capture_stop", "capture_outcome": failureOutcome.rawValue,
                 "trigger": recordingSnapshot.trigger.rawValue,
-                "stop_cause": capture.internalStopCause ?? "unrecorded",
+                "stop_cause": MeetingCaptureStopCause.unexpected(capture.internalStopCause),
             ], uniquingKeysWith: { _, new in new }), isFailure: true)
         DiagnosticsTrail.record(
             level: .error,

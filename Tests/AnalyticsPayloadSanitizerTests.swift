@@ -10,6 +10,24 @@ func testAnalyticsPayloadSanitizer() {
             assertEqual(sanitized["capture_outcome"], "system_audio_unverified", "bounded outcome must remain visible for \(event)")
         }
     }
+    runSuite("stop_cause survives capture-stop analytics policies") {
+        for event in [
+            "meeting_capture_stopped_under_controller",
+            "meeting_capture_health_snapshot",
+            "meeting_recording_stopped",
+            "meeting_recording_cancelled",
+        ] {
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                ["stop_cause": "mic_write_failed"],
+                allowedKeys: AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? []
+            )
+            assertEqual(
+                sanitized["stop_cause"],
+                "mic_write_failed",
+                "stop_cause must remain visible for \(event)"
+            )
+        }
+    }
     runSuite("Meeting measurement scope survives the real analytics policy") {
         for event in ["meeting_recording_started", "meeting_recording_stopped", "meeting_recording_start_failed", "meeting_recording_cancelled", "meeting_capture_health_snapshot", "meeting_capture_stopped_under_controller", "meeting_transcript_failed", "meeting_transcript_skipped"] {
             let scope = MeetingCaptureVolumeDiagnostics.measurementScope
@@ -21,7 +39,7 @@ func testAnalyticsPayloadSanitizer() {
     }
 
     runSuite("Analytics taxonomy drops free text instead of forwarding redacted excerpts") {
-        for key in ["failure_kind", "failure_stage", "start_failure_stage", "trigger", "quality_reason", "capture_outcome", "selection_reason", "finalization_reason", "review_mode"] {
+        for key in ["failure_kind", "failure_stage", "start_failure_stage", "trigger", "quality_reason", "capture_outcome", "selection_reason", "finalization_reason", "review_mode", "stop_cause"] {
             let safe = AnalyticsPayloadSanitizer.sanitizeProperties([key: "Confidential words /Users/example/private.txt"], allowedKeys: [key])
             assertNil(safe[key], "taxonomy values must be codes")
         }

@@ -14,6 +14,11 @@ force-installed by Sparkle so existing users recover from a regression.
 ## Post-1.1.50 Rollup (see GitHub Releases for per-version notes)
 
 ### Fixed
+- Meeting capture no longer ends the whole recording when the mic input
+  format changes mid-meeting (Bluetooth HFP / AirPods route change, a
+  default-input swap). The mic tap recovers onto a new segment; already
+  recorded audio and the system-audio track stay. Unexpected capture-stop
+  Sentry events always include a `stop_cause` tag.
 - Dragging the main window onto another display no longer jumps it away from
   the pointer. AppKit was snapping the window mid-drag to the last frame it
   remembered for that display.

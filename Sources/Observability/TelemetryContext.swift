@@ -44,6 +44,9 @@ enum TelemetryContext {
         }
         result["selection_reason"] = category(result["selection_reason"]) ?? "unknown"
         result["trigger"] = category(result["trigger"]) ?? "unknown"
+        if result["stop_cause"] != nil {
+            result["stop_cause"] = category(result["stop_cause"]) ?? "unrecorded"
+        }
         // `unknown` only comes from a snapshot that hasn't been read yet;
         // keep it rather than reporting a permission as denied.
         for key in TelemetryPermissionSnapshot.keys {

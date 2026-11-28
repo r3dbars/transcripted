@@ -381,6 +381,9 @@ final class MeetingCaptureBridge: ObservableObject {
                         [
                             "mic_file_available": "\(self.audio.micAudioFileURL != nil)",
                             "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
+                            "stop_cause": MeetingCaptureStopCause.unexpected(
+                                self.audio.internalStopCause?.rawValue
+                            ),
                             "stop_timeout_seconds": "\(stopTimeout / 1_000_000_000)",
                         ],
                         uniquingKeysWith: { _, new in new }

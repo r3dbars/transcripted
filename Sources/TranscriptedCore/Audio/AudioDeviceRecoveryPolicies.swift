@@ -155,6 +155,7 @@ enum MicEngineConfigurationChangePolicy {
         isRecovering: Bool,
         changedEngineIsRunning: Bool,
         deliveredNewBuffer: Bool,
+        liveFormatMatchesRecording: Bool = true,
         secondsSinceLastRecoveryEnded: TimeInterval?,
         recoveryAttemptsUsed: Int,
         maxRecoveryAttempts: Int
@@ -163,8 +164,11 @@ enum MicEngineConfigurationChangePolicy {
         guard !isRecovering else { return .waitForRecovery }
         // A running engine was not stopped by the change. A stopped one can
         // still hand over one queued tap block afterwards, so a new buffer
-        // only means "flowing" while the engine runs.
-        guard !changedEngineIsRunning else {
+        // only means "flowing" while the engine runs. If the engine kept
+        // running but the input format no longer matches the mic file
+        // (AirPods HFP flip, default-input change), those buffers cannot be
+        // written and must recover the same way as a stopped engine.
+        if changedEngineIsRunning, liveFormatMatchesRecording {
             return deliveredNewBuffer ? .stillFlowing : .engineStillRunning
         }
         // Measured from when the last recovery ended: a failed one takes
@@ -175,6 +179,61 @@ enum MicEngineConfigurationChangePolicy {
         }
         guard recoveryAttemptsUsed < maxRecoveryAttempts else { return .leaveToWatchdog }
         return .recover
+    }
+}
+
+/// Whether a mic buffer can be written to the current recording file, or
+/// the tap has to be restarted onto a new segment instead.
+///
+/// `AVAudioFile.write` rejects a buffer whose sample rate or channel count
+/// does not match the file. After an `AVAudioEngineConfigurationChange` the
+/// engine can keep running and deliver a new rate (Bluetooth HFP, a
+/// default-input swap) into the old file. Counting those writes as fatal
+/// ended the whole meeting (APPLE-MACOS-2D, `mic_write_failed`) even though
+/// system audio and already-recorded mic audio were fine.
+enum MicWriteFormatPolicy {
+    /// Same 1 Hz bar as `MicInPlaceRestartPolicy.formatStillMatchesDevice`.
+    static func ratesMatch(_ a: Double, _ b: Double) -> Bool {
+        a.isFinite && b.isFinite && abs(a - b) <= 1
+    }
+
+    enum Decision: Equatable {
+        /// Buffer, tap, and file agree: write this buffer.
+        case write
+        /// This tap's format is not the current file's (recovery already
+        /// replaced the writer). Drop the stale buffer; do not recover again.
+        case dropStale
+        /// The live tap is delivering a format the file cannot take. Restart
+        /// the mic onto a new segment; do not count this as a fatal write.
+        case recover
+    }
+
+    static func decision(
+        bufferSampleRate: Double,
+        bufferChannelCount: AVAudioChannelCount,
+        tapSampleRate: Double,
+        tapChannelCount: AVAudioChannelCount,
+        fileSampleRate: Double,
+        fileChannelCount: AVAudioChannelCount
+    ) -> Decision {
+        // The mic file is always mono. A multi-channel tap is downmixed.
+        let tapMatchesFile = ratesMatch(tapSampleRate, fileSampleRate) && fileChannelCount == 1
+        guard tapMatchesFile else { return .dropStale }
+        let bufferMatchesTap = ratesMatch(bufferSampleRate, tapSampleRate)
+            && bufferChannelCount == tapChannelCount
+            && bufferChannelCount > 0
+        return bufferMatchesTap ? .write : .recover
+    }
+
+    /// `AVAudioFile.write` typically throws OSStatus -50 (`paramErr`) or
+    /// `'fmt?'` when the buffer cannot go in the file. Other I/O failures
+    /// still count toward the consecutive-write cap.
+    static func isFormatMismatchError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.code == -50 { return true }
+        // kAudioFormatUnsupportedDataFormatError ('fmt?')
+        if nsError.code == 0x666D743F { return true }
+        return false
     }
 }
 
