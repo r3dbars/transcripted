@@ -5,6 +5,7 @@ import Foundation
 /// cache, and it must turn off window tabbing before any window exists. That
 /// cache answers Sidecar device-generation notifications with a synchronous
 /// XPC call on the main thread (Sentry APPLE-MACOS-3K).
+@MainActor
 func testAppLaunchWindowPolicy() {
     runSuite("Launch does not prewarm the island panel") {
         assertFalse(

@@ -8,6 +8,7 @@ import AppKit
 /// `_NSWindowSidecarDeviceCache`. That cache observes Sidecar device-generation
 /// notifications and answers them with a synchronous XPC call on the main
 /// thread. A 5+ second wait there is an app hang.
+@MainActor
 enum AppLaunchWindowPolicy {
     /// The island panel is created on first show. `prewarm()` orderFronts an
     /// NSPanel, which is enough to register the Sidecar cache for the rest of
