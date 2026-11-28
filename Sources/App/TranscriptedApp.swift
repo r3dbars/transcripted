@@ -20,6 +20,11 @@ struct TranscriptedApp: App {
         // A write to a dead child's stdin raises SIGPIPE; ignore it so write()
         // returns EPIPE instead of killing the app (possibly mid-recording).
         ProcessSignals.ignoreSIGPIPE()
+        // Before SwiftUI's Settings scene or any NSWindow exists: window
+        // tabbing is how AppKit first builds the Window menu's Sidecar items,
+        // whose device cache then hangs the main thread on XPC
+        // (Sentry APPLE-MACOS-3K).
+        AppLaunchWindowPolicy.disableAutomaticWindowTabbing()
     }
 
     var body: some Scene {
@@ -204,7 +209,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] text in
             self?.pasteRecentDictation(text)
         }
-        notchIsland.prewarm()
+        // Creating (and especially orderFront-ing) the island NSPanel at
+        // launch registers AppKit's Sidecar device cache, which then hangs
+        // the main thread on Sidecar XPC (Sentry APPLE-MACOS-3K). The panel
+        // is created on first show instead.
+        if AppLaunchWindowPolicy.prewarmsIslandPanel {
+            notchIsland.prewarm()
+        }
         AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.

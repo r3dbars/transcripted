@@ -15,6 +15,9 @@ enum TranscriptedOnboardingWindow {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
+        // Window tabbing pulls in AppKit's Sidecar "Move to iPad" menu items
+        // (Sentry APPLE-MACOS-3K). Setup is a single non-document window.
+        window.tabbingMode = .disallowed
         // Fixed size: the content is laid out for one frame, so resizing only
         // added empty margin.
         window.minSize = preferredSize

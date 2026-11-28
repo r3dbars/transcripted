@@ -34,6 +34,9 @@ final class NotchIslandPanel: NSPanel {
         self.titleVisibility = .hidden
         self.isMovableByWindowBackground = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // Window tabbing pulls in AppKit's Sidecar "Move to iPad" menu items
+        // (Sentry APPLE-MACOS-3K). The island is not a document window.
+        self.tabbingMode = .disallowed
         self.acceptsMouseMovedEvents = true
         self.animationBehavior = .none
         // Exclude the island from screen capture / screen sharing, like the
