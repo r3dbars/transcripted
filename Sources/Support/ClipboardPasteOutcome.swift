@@ -182,7 +182,8 @@ enum TextPasteOutcome: Equatable {
 }
 
 /// Result of copying dictation text after a focus-moved or Accessibility-off
-/// fallback. Incomplete snapshots refuse instead of overwriting the clipboard.
+/// fallback. Password, changed, and too-large snapshots refuse; exotic
+/// unreadable types still copy the dictation.
 enum ClipboardManualCopyResult: Equatable {
     case copied
     case writeFailed

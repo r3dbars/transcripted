@@ -14,6 +14,11 @@ force-installed by Sparkle so existing users recover from a regression.
 ## Post-1.1.50 Rollup (see GitHub Releases for per-version notes)
 
 ### Fixed
+- Dictation paste-back no longer gives up when the clipboard holds a file
+  promise or another type that cannot be snapshotted. The words are pasted,
+  or left on the clipboard for ⌘V if the paste cannot be confirmed. A
+  password-manager copy that could not be read, a clipboard that changed
+  mid-paste, or one too large to set aside is still left alone.
 - Launch no longer builds the Notch island window until you dictate, record a
   meeting, or get a call prompt. Creating that window at startup was freezing
   the app for several seconds on some Macs.

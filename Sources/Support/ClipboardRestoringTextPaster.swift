@@ -610,32 +610,31 @@ final class ClipboardRestoringTextPaster {
             let currentString = pending.pasteboard.string(forType: .string)
             // Clipboard managers may rewrite a lazy pasteboard while it is read.
             // Never classify text from one generation as belonging to another.
-            guard pending.pasteboard.changeCount == observedChangeCount else {
+            var generationChanged = pending.pasteboard.changeCount != observedChangeCount
+            if !generationChanged, currentString == nil {
+                _ = pending.pasteboard.pasteboardItems
+                generationChanged = pending.pasteboard.changeCount != observedChangeCount
+            }
+            switch ClipboardPasteDecision.fallbackRecovery(
+                currentString: generationChanged ? nil : currentString,
+                dictation: pending.temporaryString,
+                generationChanged: generationChanged
+            ) {
+            case .keepExistingDictation:
+                return .dictationPresent
+            case .leaveChangedClipboard:
                 return .clipboardChanged
+            case .recopyDictation:
+                // Empty clipboard, or a rich-only rewrite with no string:
+                // put the dictation back so a manual ⌘V still works.
+                guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
+                    return .clipboardEmpty
+                }
+                if savingClipboardForNextPaste {
+                    saveClipboardForNextPaste(pending)
+                }
+                return .dictationPresent
             }
-            if let currentString {
-                return currentString == pending.temporaryString
-                    ? .dictationPresent
-                    : .clipboardChanged
-            }
-            let currentItems = pending.pasteboard.pasteboardItems
-            guard pending.pasteboard.changeCount == observedChangeCount else {
-                return .clipboardChanged
-            }
-            guard currentItems?.isEmpty != false else {
-                return .clipboardChanged
-            }
-
-            // A failed paste consumer can clear the temporary pasteboard without
-            // replacing it. Recover only from that truly-empty state; never
-            // overwrite a non-empty user or clipboard-manager change.
-            guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
-                return .clipboardEmpty
-            }
-            if savingClipboardForNextPaste {
-                saveClipboardForNextPaste(pending)
-            }
-            return .dictationPresent
         }
         guard copyTextToClipboard(pending.temporaryString, to: pending.pasteboard) else {
             return .unavailable

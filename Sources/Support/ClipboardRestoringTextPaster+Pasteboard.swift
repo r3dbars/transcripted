@@ -158,6 +158,17 @@ extension ClipboardRestoringTextPaster {
         var containsPrivacyMarker = false
         /// Why an incomplete snapshot cannot be restored. Nil when complete.
         var incompleteCause: ClipboardSnapshotCause? = nil
+        /// True when a privacy-marked item had a real payload that could not
+        /// be read. Paste-back must not overwrite that clipboard.
+        var privacyPayloadMissing = false
+
+        /// At least one captured representation that is not only a privacy
+        /// marker, so a later restore can put something real back.
+        var hasRestorableCapturedData: Bool {
+            items.contains { item in
+                item.keys.contains { !ClipboardRestoringTextPaster.privacyMarkerTypes.contains($0) }
+            }
+        }
     }
 
     struct ClipboardSnapshotAttempt {
@@ -183,9 +194,10 @@ extension ClipboardRestoringTextPaster {
 
     /// File-promise pasteboard types that cannot be faithfully restored from
     /// raw `Data` and whose eager read can trigger slow/stalling exports in
-    /// Photos, Preview, Mail, Chrome, or Figma. Skipped when an item carries
-    /// other readable representations; an item with ONLY promise types still
-    /// refuses paste-back so the user's clipboard is never clobbered.
+    /// Photos, Preview, Mail, Chrome, or Figma. Skipped when snapshotting.
+    /// An item with only promise types marks the snapshot incomplete, but
+    /// paste-back still runs (`ClipboardPasteDecision`); the dictation stays
+    /// on the clipboard afterward because those types cannot be restored.
     nonisolated static let nonRestorablePromiseTypes: Set<NSPasteboard.PasteboardType> = [
         NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-content-type"),
         NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url"),
@@ -256,7 +268,8 @@ extension ClipboardRestoringTextPaster {
                 items: [],
                 isComplete: false,
                 containsPrivacyMarker: false,
-                incompleteCause: .changed
+                incompleteCause: .changed,
+                privacyPayloadMissing: false
             )
         }
         Self.isSnapshottingPasteboard = true
@@ -280,6 +293,7 @@ extension ClipboardRestoringTextPaster {
         // stalled promised item must not hang delivery.
         var totalBytes = 0
         var containsPrivacyMarker = false
+        var privacyPayloadMissing = false
         var timedOut = false
         var superseded = false
         let started = now()
@@ -295,6 +309,7 @@ extension ClipboardRestoringTextPaster {
             var hasEmptyRealData = false
             var skippedTypes = 0
             var skippedNonIgnorableUnreadableSecondary = false
+            var itemDeclaredPrivacyMarker = false
             var itemCause: ClipboardSnapshotCause?
             let orderedTypes = Self.prioritizedSnapshotTypes(item.types)
             let hasRestorableCandidateTypes = orderedTypes.contains {
@@ -324,6 +339,7 @@ extension ClipboardRestoringTextPaster {
                     // Checked from the type list, before any data read, so a
                     // marker with no readable data still counts.
                     containsPrivacyMarker = true
+                    itemDeclaredPrivacyMarker = true
                 }
                 // Once full, avoid asking additional lazy providers to allocate
                 // data that cannot be retained. Individual provider fetches can
@@ -397,11 +413,14 @@ extension ClipboardRestoringTextPaster {
             if !hasRestorableRealRepresentation, skippedTypes > 0 {
                 isComplete = false
                 incompleteCause = ClipboardSnapshotCause.preferring(incompleteCause, itemCause ?? .unreadable)
+                if itemDeclaredPrivacyMarker {
+                    privacyPayloadMissing = true
+                }
             }
             items.append(typeData)
             if timedOut {
-                // A partial snapshot must not be restored: later items were
-                // never read, and writing it back would drop them.
+                // Later items were not read. Paste still runs; restore puts
+                // back only what was captured.
                 isComplete = false
                 incompleteCause = .timeout
                 break
@@ -415,12 +434,14 @@ extension ClipboardRestoringTextPaster {
             items: items,
             isComplete: isComplete,
             containsPrivacyMarker: containsPrivacyMarker,
-            incompleteCause: isComplete ? nil : incompleteCause
+            incompleteCause: isComplete ? nil : incompleteCause,
+            privacyPayloadMissing: privacyPayloadMissing
         )
     }
 
-    /// Snapshot the pasteboard and refuse paste-back when it cannot be put
-    /// back later. Never clears or writes when the snapshot is incomplete.
+    /// Snapshot the pasteboard. Refuse only when overwriting would lose a
+    /// password we could not read, a newer copy, or something too large to
+    /// set aside. Unreadable exotic types still paste.
     func snapshotClipboardForPaste(
         from pasteboard: any ClipboardPasteboard,
         read: ClipboardSnapshotReadContext = .production(),
@@ -447,16 +468,19 @@ extension ClipboardRestoringTextPaster {
         let refusal: TextPasteOutcome?
         if !isCurrentOperation() {
             refusal = .failed("Paste was cancelled.", reason: .cancelled)
-        } else if !savedItems.isComplete {
-            let cause = savedItems.incompleteCause ?? .unreadable
-            refusal = .failed(cause.refusalMessage, reason: .clipboardSnapshotIncomplete(cause))
-        } else if pasteboard.changeCount != snapshotChangeCount {
-            refusal = .failed(
-                ClipboardSnapshotCause.changed.refusalMessage,
-                reason: .clipboardSnapshotIncomplete(.changed)
-            )
         } else {
-            refusal = nil
+            switch ClipboardPasteDecision.snapshotPastePlan(
+                isComplete: savedItems.isComplete,
+                cause: savedItems.incompleteCause,
+                privacyPayloadMissing: savedItems.privacyPayloadMissing,
+                hasCapturedRestorableData: savedItems.hasRestorableCapturedData,
+                changeCountMatches: pasteboard.changeCount == snapshotChangeCount
+            ) {
+            case .paste:
+                refusal = nil
+            case .refuse(let cause):
+                refusal = .failed(cause.refusalMessage, reason: .clipboardSnapshotIncomplete(cause))
+            }
         }
         return ClipboardSnapshotAttempt(
             savedItems: savedItems,
@@ -480,13 +504,17 @@ extension ClipboardRestoringTextPaster {
         _ savedItems: PasteboardSnapshot, matching expectedString: String?,
         changeCount: Int, to pasteboard: any ClipboardPasteboard
     ) {
-        guard savedItems.isComplete,
+        guard ClipboardPasteDecision.shouldRestoreCapturedItems(
+                isComplete: savedItems.isComplete,
+                hasCapturedRestorableData: savedItems.hasRestorableCapturedData
+              ),
               pasteboard.changeCount == changeCount,
               pasteboard.string(forType: .string) == expectedString,
               pasteboard.changeCount == changeCount else { return }
 
         pasteboard.clearContents()
-        let items = savedItems.items.map { typeData -> NSPasteboardItem in
+        let items = savedItems.items.compactMap { typeData -> NSPasteboardItem? in
+            guard !typeData.isEmpty else { return nil }
             let item = NSPasteboardItem()
             for (type, data) in typeData {
                 item.setData(data, forType: type)

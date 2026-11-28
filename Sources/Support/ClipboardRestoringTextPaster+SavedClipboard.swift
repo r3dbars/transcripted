@@ -85,9 +85,9 @@ extension ClipboardRestoringTextPaster {
 
     /// Copies text for a manual ⌘V on a path that never borrowed the clipboard
     /// (focus moved first, or Accessibility is off), saving the user's clipboard
-    /// first so the next paste can put it back. An incomplete or timed-out
-    /// snapshot refuses here too: the user's clipboard stays put, and the
-    /// words stay available through Copy and Dictations.
+    /// first so the next paste can put it back. A password we could not read,
+    /// a clipboard that changed, or one too large to set aside still refuses;
+    /// unreadable exotic types copy the dictation so ⌘V still works.
     func copyTextForManualPaste(
         _ text: String,
         to pasteboard: any ClipboardPasteboard,
