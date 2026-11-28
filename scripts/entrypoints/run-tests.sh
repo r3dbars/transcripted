@@ -463,6 +463,7 @@ APP_SOURCES=(
     "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/SingleInstanceReopenPolicy.swift"
     "Sources/Support/AppLaunchSteps.swift"
+    "Sources/Support/AppLaunchWindowPolicy.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/DictationTargetAccessibilityPrimer.swift"
     "Sources/Support/StaleAccessibilityGrantPolicy.swift"

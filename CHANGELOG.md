@@ -14,6 +14,9 @@ force-installed by Sparkle so existing users recover from a regression.
 ## Post-1.1.50 Rollup (see GitHub Releases for per-version notes)
 
 ### Fixed
+- Launch no longer builds the Notch island window until you dictate, record a
+  meeting, or get a call prompt. Creating that window at startup was freezing
+  the app for several seconds on some Macs.
 - Dragging the main window onto another display no longer jumps it away from
   the pointer. AppKit was snapping the window mid-drag to the last frame it
   remembered for that display.

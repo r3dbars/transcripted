@@ -42,6 +42,7 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(panel.canBecomeKey, "clicking the island must not pull focus from the app being dictated into")
         assertFalse(panel.canBecomeMain, "the island is never a main window")
         assertEqual(panel.level, .statusBar, "the island sits in the menu bar, above it, below open menus")
+        assertEqual(panel.tabbingMode, .disallowed, "window tabbing would register AppKit's Sidecar device cache")
         let suiteName = "OverlayScreenSharePrivacyTests.island.\(UUID().uuidString)"
         if let defaults = UserDefaults(suiteName: suiteName) {
             defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -85,6 +86,7 @@ func testOverlayScreenSharePrivacy() async {
         assertEqual(window.minSize, preferredSize, "preserve onboarding minimum size")
         assertEqual(window.styleMask, [.titled, .closable, .fullSizeContentView], "onboarding is a fixed-size window: its content is laid out for one frame")
         assertFalse(window.isReleasedWhenClosed, "the controller retains its reusable window")
+        assertEqual(window.tabbingMode, .disallowed, "window tabbing would register AppKit's Sidecar device cache")
     }
 
     runSuite("Settings stays capturable without displaying a window") {
@@ -92,6 +94,7 @@ func testOverlayScreenSharePrivacy() async {
         assertEqual(window.sharingType, .readOnly, "Settings supports normal macOS screenshots")
         assertFalse(window.isVisible, "constructing Settings does not show or activate it")
         assertEqual(window.contentMinSize, NSSize(width: 880, height: 640), "preserve Settings minimum size")
+        assertEqual(window.tabbingMode, .disallowed, "window tabbing would register AppKit's Sidecar device cache")
     }
 
     runSuite("detected meeting prompts go to the call prompt on the island") {
