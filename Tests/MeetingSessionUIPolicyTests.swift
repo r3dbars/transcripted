@@ -367,7 +367,8 @@ func testMeetingSessionUIPolicy() async {
             MeetingCaptureHealthEvidence(
                 systemAudioSignalVerified: false,
                 systemAudioFinalizationFailed: false,
-                systemAudioPermissionRecoveryNeeded: false
+                systemAudioPermissionRecoveryNeeded: false,
+                microphonePermissionRecoveryNeeded: false
             ),
             "no PCM yet means unverified, and no typed denial means no grant button"
         )
@@ -384,6 +385,13 @@ func testMeetingSessionUIPolicy() async {
         let denied = MeetingCaptureHealthEvidence.make(capture: capture)
         assertTrue(denied.systemAudioPermissionRecoveryNeeded, "a typed macOS denial offers the grant action")
         assertFalse(denied.systemAudioSignalVerified, "a denial never counts as heard audio")
+        assertFalse(denied.microphonePermissionRecoveryNeeded)
+
+        capture.systemAudioStartPermissionExplicitlyDenied = false
+        capture.microphoneStartPermissionExplicitlyDenied = true
+        let micDenied = MeetingCaptureHealthEvidence.make(capture: capture)
+        assertTrue(micDenied.microphonePermissionRecoveryNeeded, "a typed Microphone denial offers Settings")
+        assertFalse(micDenied.systemAudioPermissionRecoveryNeeded)
     }
 
     runSuite("A Record request is turned away while a capture is starting, recording, or stopping") {
@@ -501,6 +509,7 @@ private final class StopSequenceCaptureFake: MeetingCaptureControlling {
     var hasObservedSystemAudioSignal = false
     var systemAudioFinalizationFailed = false
     var systemAudioStartPermissionExplicitlyDenied = false
+    var microphoneStartPermissionExplicitlyDenied = false
 
     func flushSharedDictationMicHandler() async {
         onFlush?()

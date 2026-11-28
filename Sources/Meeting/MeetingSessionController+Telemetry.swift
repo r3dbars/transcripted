@@ -14,8 +14,24 @@ extension MeetingSessionController {
         value ? "true" : "false"
     }
 
-    func meetingStartFailureKind(from message: String, stage: String? = nil) -> String {
-        MeetingStartFailureClassifier.kind(from: message, stage: stage)
+    func meetingStartFailureKind(
+        from message: String,
+        stage: String? = nil,
+        microphoneGranted: Bool? = nil,
+        explicitMicrophoneDenial: Bool = false
+    ) -> String {
+        MeetingStartFailureClassifier.kind(
+            from: message,
+            stage: stage,
+            microphoneGranted: microphoneGranted,
+            explicitMicrophoneDenial: explicitMicrophoneDenial
+        )
+    }
+
+    func microphoneGrantedFromSnapshot() -> Bool? {
+        MeetingStartFailureClassifier.microphoneGranted(
+            from: TelemetryPermissionSnapshot.shared.current()
+        )
     }
 
     func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot, telemetryIdentity: UUID? = nil) -> [String: String] {

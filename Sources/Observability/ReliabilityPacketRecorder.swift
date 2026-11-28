@@ -428,6 +428,8 @@ enum ReliabilityPacketRecorder {
         "selected_input_class",
         "selection_overrode_default",
         "selection_reason",
+        "start_failure_cause",
+        "start_failure_stage",
         "session_active",
         "session_duration_bucket",
         "session_kind",

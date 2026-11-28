@@ -276,6 +276,7 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "meeting_start_failed",
             context: [
+                "start_failure_cause": "bluetooth_unready",
                 "start_failure_stage": "system_audio",
                 "system_failed": "true",
                 "voice_processing": "true",
@@ -285,6 +286,7 @@ func testSentryEventPolicy() {
             ]
         )
 
+        assertEqual(tags["start_failure_cause"], "bluetooth_unready", "specific start-failure cause should stay searchable")
         assertEqual(tags["start_failure_stage"], "system_audio", "typed start stage should stay searchable")
         assertEqual(tags["system_failed"], "true", "system-audio failure state should stay searchable")
         assertEqual(tags["voice_processing"], "true", "VPIO request state should stay searchable")

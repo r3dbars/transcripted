@@ -157,4 +157,19 @@ func testMeetingFailureCopy() {
             assertFalse(copy.detail.contains("Home"), "\(message) copy should say Meetings page, not Home")
         }
     }
+
+    runSuite("MeetingFailureCopy names a Bluetooth mic that is not ready without blaming permission") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: MeetingStartFailureCopy.userMessage(
+                raw: "Recording failed to start: The microphone route did not become ready.",
+                cause: "bluetooth_unready"
+            ),
+            shortErrorMessage: "Recording failed to start",
+            isRetryable: true
+        )
+        assertEqual(copy.title, "Mic didn't start")
+        assertTrue(copy.detail.lowercased().contains("bluetooth"), "the person is told the headset is the problem")
+        assertFalse(copy.detail.lowercased().contains("permission"), "a Bluetooth settle miss is not a Microphone TCC denial")
+        assertFalse(copy.detail.contains("\u{2014}"), "user copy avoids em dashes")
+    }
 }

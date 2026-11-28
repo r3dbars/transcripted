@@ -94,6 +94,8 @@ func testNotchIslandDropButtons() {
         assertEqual(error.map(\.title), ["Dismiss", "Open"])
         let denied = NotchIslandDropButtons.buttons(for: .meetingError(title: "x", message: "y", canOpen: false, grantsSystemAudio: true))
         assertEqual(denied.map(\.title), ["Dismiss", "Open Settings"])
+        let micDenied = NotchIslandDropButtons.buttons(for: .meetingError(title: "x", message: "y", canOpen: false, grantsMicrophone: true))
+        assertEqual(micDenied.map(\.title), ["Dismiss", "Open Settings"])
         assertEqual(NotchIslandDropButtons.buttons(for: .meetingCallAudioAsk).map(\.title), ["Dismiss", "Turn on"])
         let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")
         assertEqual(NotchIslandDropButtons.buttons(for: .dictationMessage(message)).map(\.title), ["Dismiss", "Try again"])

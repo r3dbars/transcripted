@@ -467,6 +467,21 @@ final class MicRecoveryFallbackTests: XCTestCase {
         )
     }
 
+    func testFailedBluetoothMicFallsBackToAUSBMic() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth)
+        let usbMic = device(id: 40, name: "Shure MV7", transport: .usb)
+
+        let fallback = MeetingInputDeviceSelectionPolicy.builtInFallbackAfterFailure(
+            failedInputID: airPods.id,
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods, usbMic]
+        )
+
+        XCTAssertEqual(fallback?.selectedInput, usbMic)
+        XCTAssertEqual(fallback?.reason, .builtInFallbackAfterFailure)
+    }
+
     func testNoFallbackWithoutABuiltInMic() {
         let usbMic = device(id: 30, name: "USB Audio Device", transport: .usb)
         let zoomAudio = device(id: 40, name: "ZoomAudioDevice", transport: .virtual)

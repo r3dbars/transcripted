@@ -67,6 +67,16 @@ enum MeetingRecordingStartGate {
             || explicitSystemAudioPermissionDenialObserved
     }
 
+    /// Show the Microphone Settings action only for an observed missing grant,
+    /// never for a Bluetooth mic that failed to become ready.
+    static func shouldOfferMicrophonePermissionRecovery(
+        missingPermissions: [String] = [],
+        explicitMicrophonePermissionDenialObserved: Bool = false
+    ) -> Bool {
+        missingPermissions == ["microphone"]
+            || explicitMicrophonePermissionDenialObserved
+    }
+
     static var systemAudioRecordingSummary: String {
         TranscriptedPermissionKind.systemAudioRecordingSummary
     }

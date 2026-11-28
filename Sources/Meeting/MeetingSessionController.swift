@@ -158,6 +158,9 @@ extension MeetingSessionController {
                     reason: "start_blocked_permission",
                     systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
                         missingPermissions: startDecision.missingPermissions
+                    ),
+                    microphonePermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery(
+                        missingPermissions: startDecision.missingPermissions
                     )
                 )
             }
@@ -218,7 +221,7 @@ extension MeetingSessionController {
             activeRecordingSuggestedTitle = nil
             activeRecordingStartedAt = nil
             let rawFailureMessage = capture.errorMessage ?? "Meeting audio didn't start. Check your audio devices, then try again."
-            let failureMessage = MeetingRecordingStartGate.captureFailureMessage(
+            let gatedFailureMessage = MeetingRecordingStartGate.captureFailureMessage(
                 rawFailureMessage,
                 systemAudioPermissionCheckWasInconclusive: startDecision.systemAudioPermissionCheckWasInconclusive,
                 explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
@@ -226,13 +229,31 @@ extension MeetingSessionController {
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: capture.startFailureStage == .systemAudio ? .failed : nil
             )
+            let microphoneGranted = microphoneGrantedFromSnapshot()
+            let failureKind = meetingStartFailureKind(
+                from: gatedFailureMessage,
+                stage: capture.startFailureStage.rawValue,
+                microphoneGranted: microphoneGranted,
+                explicitMicrophoneDenial: capture.microphoneStartPermissionExplicitlyDenied
+            )
+            let startFailureCause = MeetingStartFailureClassifier.cause(
+                kind: failureKind,
+                stage: capture.startFailureStage.rawValue,
+                inputDeviceClass: pipelineSnapshot.inputDeviceClass,
+                selectionReason: pipelineSnapshot.selectionReason,
+                stabilizationOutcome: pipelineSnapshot.stabilizationOutcome,
+                message: gatedFailureMessage,
+                explicitMicrophoneDenial: capture.microphoneStartPermissionExplicitlyDenied
+            )
+            let failureMessage = MeetingStartFailureCopy.userMessage(
+                raw: gatedFailureMessage,
+                cause: startFailureCause
+            )
             let failureProperties = TelemetryContext.enrich(event: "meeting_recording_start_failed", properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot, telemetryIdentity: failedStartIdentity).merging(
                 [
-                    "failure_kind": meetingStartFailureKind(
-                        from: failureMessage,
-                        stage: capture.startFailureStage.rawValue
-                    ),
+                    "failure_kind": failureKind,
                     "start_failure_stage": capture.startFailureStage.rawValue,
+                    "start_failure_cause": startFailureCause,
                     "trigger": trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
@@ -256,11 +277,12 @@ extension MeetingSessionController {
                 modelState: state.diagnosticName,
                 context: failureProperties
             )
+            let startHealth = MeetingCaptureHealthEvidence.make(capture: capture)
             transition(
                 to: .error(failureMessage),
                 reason: "capture_start_failed",
-                systemAudioPermissionRecoveryNeeded: MeetingCaptureHealthEvidence.make(capture: capture)
-                    .systemAudioPermissionRecoveryNeeded
+                systemAudioPermissionRecoveryNeeded: startHealth.systemAudioPermissionRecoveryNeeded,
+                microphonePermissionRecoveryNeeded: startHealth.microphonePermissionRecoveryNeeded
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
             trackDetectedPromptOutcome(

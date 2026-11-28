@@ -17,6 +17,7 @@ extension Audio {
         error = nil
         internalStopCause = nil
         systemAudioStartPermissionExplicitlyDenied = false
+        microphoneStartPermissionExplicitlyDenied = false
         startFailureStage = .unknown
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         micBufferCount = 0
@@ -80,6 +81,22 @@ extension Audio {
         startFailureStage = stage
     }
 
+    func recordMicrophonePermissionDenial(_ message: String) {
+        microphoneStartPermissionExplicitlyDenied = true
+        recordStartFailureStage(.microphonePermission)
+        error = message
+    }
+
+    /// True when preflight already named a Microphone TCC denial, so the
+    /// start must not continue and the failure must not look like a device miss.
+    static func isMicrophonePermissionPreflightFailure(_ message: String?) -> Bool {
+        guard let message else { return false }
+        let normalized = message.lowercased()
+        return normalized.contains("microphone access denied")
+            || normalized.contains("microphone permission")
+            || normalized.contains("mic_not_authorized")
+    }
+
     private func beginStartIntent() -> UUID {
         // Gate duplicate start requests while the permission prompt is open or
         // the async recorder setup is still being scheduled.
@@ -111,6 +128,7 @@ extension Audio {
         // reaches prepareForNewRecordingStart(). Clear the previous attempt's
         // typed stage before any validation can return.
         startFailureStage = .unknown
+        microphoneStartPermissionExplicitlyDenied = false
 
         let startIntentId = beginStartIntent()
         let paths = paths
@@ -124,7 +142,18 @@ extension Audio {
                     AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
                     self.clearStartIntent(startIntentId)
                     self.isStarting = false
-                    self.error = validationResult.errorMessage
+                    // RecordingValidator can refuse on a Microphone TCC denial
+                    // before `startAfterPreflight` runs. Record the typed
+                    // denial so `start_failure_cause` is mic_permission_denied
+                    // even if the permission snapshot still says granted.
+                    if Self.isMicrophonePermissionPreflightFailure(validationResult.errorMessage) {
+                        self.recordMicrophonePermissionDenial(
+                            validationResult.errorMessage
+                                ?? "Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
+                        )
+                    } else {
+                        self.error = validationResult.errorMessage
+                    }
                     return
                 }
                 self.startAfterPreflight(startIntentId: startIntentId)
@@ -149,18 +178,22 @@ extension Audio {
                         self.startAudioCaptureAsync(startIntentId: startIntentId)
                     } else {
                         // Permission denied — already on main via the outer dispatch
-                        self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
+                        self.recordMicrophonePermissionDenial(
+                            "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
+                        )
                         self.isStarting = false
                         self.clearStartIntent(startIntentId)
                     }
                 }
             }
             return
-        } else if microphoneStatus == .denied {
-            // Permission explicitly denied
+        } else if microphoneStatus == .denied || microphoneStatus == .restricted {
+            // Permission explicitly denied or restricted (parental controls).
             DispatchQueue.main.async {
                 guard self.isCurrentStartIntent(startIntentId) else { return }
-                self.error = "Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
+                self.recordMicrophonePermissionDenial(
+                    "Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
+                )
                 self.isStarting = false
                 self.clearStartIntent(startIntentId)
             }
