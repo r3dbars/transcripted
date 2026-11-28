@@ -39,10 +39,11 @@ final class CrashReporter: @unchecked Sendable {
 
         var options = Options()
         options.dsn = dsn
-        options.environment = SentryRuntimeConfiguration.environment()
-        options.releaseName = SentryRuntimeConfiguration.releaseName()
-        options.dist = SentryRuntimeConfiguration.dist()
-        CrashReporterPrivacyOptions.apply(to: &options)
+        SentrySDKOptionsBuilder.apply(
+            to: &options,
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
+            crashReportingEnabled: CrashReportingPreferences.isEnabled()
+        )
         options.enableCrashHandler = true
         options.enableUncaughtNSExceptionReporting = true
         options.enableAppHangTracking = SentryRuntimeConfiguration.appHangTrackingEnabled()
@@ -387,7 +388,7 @@ private func transcriptedUnrecognizedSelectorHandler(_ exception: NSException) {
     CrashReporter.forwardUncaughtException(exception)
 }
 
-extension Options: SentryPrivacyOptionsSettable {}
+extension Options: SentrySDKOptionsSettable {}
 
 /// Forwards `SentrySessionRotator`'s calls to the SDK. Sentry's session calls
 /// are thread-safe, and the rotator makes them off the main thread.

@@ -28,6 +28,9 @@ enum TranscriptedSettingsWindow {
         window.contentViewController = contentViewController
         window.contentMinSize = NSSize(width: 880, height: 640)
         window.isReleasedWhenClosed = false
+        // Window tabbing pulls in AppKit's Sidecar "Move to iPad" menu items,
+        // whose device cache hangs the main thread on XPC (APPLE-MACOS-3K).
+        window.tabbingMode = .disallowed
         // This is a normal user-facing app window. Keep it available to the
         // standard macOS window screenshot and screen-sharing tools.
         window.sharingType = .readOnly

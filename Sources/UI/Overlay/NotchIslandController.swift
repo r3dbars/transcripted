@@ -128,9 +128,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         return frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
     }
 
-    /// Builds the panel and draws a sample island once at launch, so the
-    /// first key press shows the island on the next frame instead of paying
-    /// for window creation, fonts and symbols.
+    /// Builds the panel and draws a sample island off-screen so the next
+    /// show does not pay for window creation, fonts and symbols.
+    ///
+    /// Launch must not call this (`AppLaunchWindowPolicy.prewarmsIslandPanel`).
+    /// `orderFront` here registers AppKit's Sidecar device cache, which then
+    /// hangs the main thread on Sidecar XPC (Sentry APPLE-MACOS-3K).
     func prewarm() {
         let (panel, islandView) = ensurePanel()
         guard !isShown, !panel.isVisible else { return }

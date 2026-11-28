@@ -33,6 +33,11 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 - keep analytics to allowlisted events and coarse buckets only (the reviewed
   exceptions are dictation and meeting speed timings, rounded to 10 ms; see below)
 - keep crash reporting separately user-controllable from anonymous analytics
+- crash reporting may send Sentry Release Health sessions (crash-free session
+  and user rates per release). Sessions use the same release and dist as crash
+  events (`transcripted@<version>` / `CFBundleVersion`), start only after
+  onboarding, and only while Crash reports is on. They do not include
+  transcript text, audio, names, emails, or paths
 - Sentry automatic app-hang tracking is on in shipped builds (Info.plist
   `TranscriptedSentryAppHangTrackingEnabled`), but only reports a main thread
   stuck 5+ seconds, and `AppHangReportPolicy` drops any hang while a modal

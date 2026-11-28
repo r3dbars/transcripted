@@ -6,8 +6,11 @@
 
 import Foundation
 
-/// The six Sentry `Options` properties CrashReporter must turn off.
-/// `Sentry.Options` conforms in CrashReporter.swift.
+/// The Sentry `Options` properties CrashReporter must turn off before the
+/// session-tracking builder runs. Auto session tracking starts false here so
+/// a caller that only applies privacy options cannot send sessions before the
+/// crash-reporting choice; `SentrySDKOptionsBuilder` then turns it on when
+/// that choice is already on. `Sentry.Options` conforms in CrashReporter.swift.
 protocol SentryPrivacyOptionsSettable {
     var sendDefaultPii: Bool { get set }
     var enableAutoSessionTracking: Bool { get set }
@@ -20,9 +23,8 @@ protocol SentryPrivacyOptionsSettable {
 enum CrashReporterPrivacyOptions {
     static func apply(to options: inout some SentryPrivacyOptionsSettable) {
         options.sendDefaultPii = false
-        // Session tracking is started explicitly after onboarding and when the
-        // user changes the crash-reporting preference. That keeps the first-run
-        // choice and later opt-outs aligned with Release Health envelopes.
+        // Fail closed: the SDK default is on. The options builder turns this
+        // back on only after onboarding, and only while crash reporting is on.
         options.enableAutoSessionTracking = false
         options.enableNetworkBreadcrumbs = false
         options.maxBreadcrumbs = 0
