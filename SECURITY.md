@@ -58,10 +58,9 @@ HTTPS, downloaded by their SDKs (FluidAudio, WhisperKit). There is no
 third-party mirror fallback. Those SDK downloads are not hash-pinned by
 Transcripted today; see `docs/threat-model.md`.
 
-## Beta build entitlements
+## Distribution entitlements
 
-The beta build is intentionally less hardened than a typical sandboxed Mac app.
-`config/entitlements/beta.plist` sets:
+Signed distribution builds (`config/entitlements/beta.plist`) are intentionally less hardened than a typical sandboxed Mac app. They set:
 
 - `com.apple.security.app-sandbox` = false
 - `com.apple.security.cs.disable-library-validation` = true
@@ -118,12 +117,7 @@ access to your saved captures.
 
 ## Update feed integrity
 
-Sparkle reads the appcast from a raw GitHub URL, but update integrity does not
-depend only on that hosting path. Each update is verified with Sparkle's EdDSA
-signature against the public key embedded in the app, so a tampered feed cannot
-install an unsigned or wrong-key build. Keep the signing key, GitHub account,
-and branch protections locked down because they are the trust roots for the
-published feed and artifacts.
+Sparkle reads the `appcast.xml` asset attached to the latest GitHub release (`releases/latest/download/appcast.xml`), and update integrity does not depend only on that hosting path. Each update is verified with Sparkle's EdDSA signature against the public key embedded in the app, so a tampered feed cannot install an unsigned or wrong-key build. Keep the signing key, GitHub account, and branch protections locked down because they are the trust roots for the published feed and artifacts.
 
 ## Supported Versions
 

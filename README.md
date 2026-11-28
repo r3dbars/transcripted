@@ -7,12 +7,11 @@
 
 <h1 align="center">Transcripted</h1>
 
-<h3 align="center">Private meeting notes that never leave your Mac. No bot joins your call.</h3>
+<h3 align="center">Private meeting notes and dictation that never leave your Mac. No bot joins your call.</h3>
 
 <p align="center">
-  Transcripted is a free, open-source Mac app for meeting notes and dictation.
-  It transcribes on your Mac and saves plain Markdown files you own.
-  You can search them, or let your AI read them.
+  Transcripted is a free, open-source macOS app that records meetings and dictation locally on your Mac<br>
+  and saves plain Markdown files you own — ready for Obsidian, Claude, Codex, or any AI tool.
 </p>
 
 <p align="center">
@@ -23,127 +22,107 @@
 </p>
 
 <p align="center">
-  <a href="#homebrew">Install with Homebrew</a> ·
+  <a href="#install">Install with Homebrew</a> ·
   <a href="https://transcripted.app/#try">Interactive demo</a> ·
-  <a href="https://transcripted.app">transcripted.app</a>
+  <a href="https://transcripted.app">transcripted.app</a> ·
+  <a href="https://github.com/r3dbars/transcripted/discussions">Discussions</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/r3dbars/transcripted/releases/latest"><img src="https://img.shields.io/github/v/release/r3dbars/transcripted?label=release&color=6e7781" alt="Latest release"></a>
-  <a href="https://github.com/r3dbars/transcripted/releases"><img src="https://img.shields.io/github/downloads/r3dbars/transcripted/total?label=downloads&color=6e7781" alt="Total downloads"></a>
-  <a href="#requirements"><img src="https://img.shields.io/badge/macOS_26%2B-Apple_silicon-6e7781?logo=apple&logoColor=white" alt="macOS 26 or later on Apple silicon"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/macOS_26%2B-Apple_silicon-6e7781?logo=apple&logoColor=white" alt="macOS 26 or later on Apple silicon"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3da639" alt="MIT license"></a>
 </p>
 
-<!-- Demo: an 18-second tour built from app screenshots. To replace it with a real
-     screen recording, follow docs/marketing/hero-video-storyboard.md. -->
 <p align="center">
-  <img src="docs/assets/launch/transcripted-hero.gif" width="800" alt="Transcripted in 18 seconds: a meeting ends with no bot in the call, the transcript is saved as a file you own, Claude answers from it, and dictation types where you were typing">
+  <img src="docs/screenshots/launch/transcripted-meetings.png" width="820" alt="Transcripted Meetings view showing an expanded meeting card with on-device summary, color-coded speakers, and local transcript">
 </p>
 
 ## What it does
 
-- **Records any meeting.** Zoom, Meet, Teams, FaceTime, or in person. It
-  records your mic and your Mac's audio, so it hears both sides and nothing
-  joins the call.
-- **Notices when a call starts.** It offers to record. It can also remind you
-  before meetings on your calendar.
-- **Knows who's talking.** It splits the call by speaker. Name someone once,
-  and it suggests their name the next time they talk. For in-person meetings,
-  turn on **People in the room** in Settings.
-- **Types what you say.** Tap a key, talk, and your words show up where you
-  were typing.
-- **Transcribes files.** Drop in an audio or video file you already have.
-- **Helps you write, if you want.** Turn on Writing to save what you write, in
-  every app or just the ones you pick, so your AI has it too. It can also
-  suggest the next few words as you type. It's off until you turn it on.
+- **Records any meeting — no bot.** Works with Zoom, Google Meet, Teams, FaceTime, Slack huddles, or in-person conversations. Captures your mic and system audio locally, so nothing joins your call.
+- **Notices when a call starts.** Offers to start recording when a call begins, and can remind you before meetings on your calendar.
+- **Knows who's talking.** Splits calls by speaker and uses call-app speaker hints to speed up naming. Name someone once and Transcripted suggests them next time. For in-person meetings, turn on **People in the room** under **Settings → Advanced → Meetings**.
+- **Click any line to hear it back.** Meetings expand in place with retained audio playback, speed controls, and track isolation.
+- **Optional on-device titles & summaries.** Turn on **Titles and summaries** in Settings to generate a title, takeaway, and short summary locally on your Mac—no cloud API required.
+- **Dictate anywhere with one key.** Hold **Right Option** to talk (or tap to keep listening, tap again to paste). Your words land right where you were typing, and audio stays available for 30 days so you can replay or re-transcribe a take.
+- **AirPods-safe by default.** Automatically uses your Mac's microphone when you're on AirPods so your headphones don't drop into garbled call mode.
+- **Transcribes audio and video files.** Drop in recordings from the Meetings page or run the bundled command-line tool.
 
-Everything runs on your Mac. The speech models ship inside the app, so
-transcription works offline.
+Everything runs locally on your Mac. The default speech and speaker models ship inside the app, so transcription works completely offline.
+
+<p align="center">
+  <img src="docs/screenshots/launch/transcripted-dictations.png" width="49%" alt="Transcripted Dictations history showing recent pasted takes by app">
+  <img src="docs/screenshots/launch/transcripted-stats.png" width="49%" alt="Transcripted local Stats view showing meeting and dictation activity stored on your Mac">
+</p>
 
 ## Your notes are plain files
 
-Each meeting becomes a Markdown file with timestamps and speaker names. Here's
-one, trimmed:
+Every meeting becomes a clean Markdown file with frontmatter, optional on-device summary, timestamps, and speaker names:
 
 ```md
 ---
 title: "Product Review Sync"
 capture_type: meeting
-date: 2026-05-13
+format_version: 2
+transcript_style: styled
+date: 2026-11-28
 duration: "18:42"
-transcription_engine: parakeet_local
-sources: [mic, system_audio]
+total_word_count: 1864
 ---
 
 # Product Review Sync
 
-Recorded May 13, 2026 at 3:05 PM  •  18 min, 42 sec  •  1864 words  •  27 turns
+Recorded Nov 28, 2026 at 10:15 AM  •  18 min, 42 sec  •  1864 words  •  6 turns
+
+## Summary
+
+Agreed to ship local-only meeting capture with no call bot, keep Markdown v2 plain for Claude and Codex, and finalize the onboarding permissions flow before Friday.
 
 ## Transcript
 
-**00:00**  [Mic/You]
-Let's capture launch feedback and decide what needs follow-up.
+[00:00] **You:** Let's walk through launch feedback and lock what goes into this week's release.
 
-**00:18**  [System/Maya]
-The main ask: no meeting bot, a clean transcript, and a summary for the issue.
+[00:18] **Maya:** The biggest ask is simple: no bot joining the call, clean local transcripts, and a fast way to ask Claude what we decided.
 ```
 
-By default, your notes are saved here:
+By default, your notes live in:
 
 ```text
 ~/Library/Application Support/Transcripted/captures/
 ```
 
-To keep them somewhere else, like an Obsidian vault, change **Capture library**
-in Settings. Transcripted can move your files for you. The full format is in
-[docs/capture-format.md](docs/capture-format.md).
+Want them inside an Obsidian vault or another folder? Change **Settings → Library → Folder** and Transcripted can move existing files for you. Full spec: [docs/capture-format.md](docs/capture-format.md).
 
 ## Ask your AI
 
-Your notes are plain files, so any AI tool that reads files can use them.
+Because everything is saved as plain Markdown, any AI tool that reads files—or supports MCP—can search and quote your meetings and dictations.
 
 ```text
 You:    What did I commit to in the product review?
 
-Claude: From Product Review Sync (May 13):
-        • Decide which launch feedback needs follow-up (00:00)
-        • Make the action items clear before the next standup (02:10)
-        Maya also asked for a summary for the issue (00:18).
+Claude: From Product Review Sync (Nov 28):
+        • Tighten the onboarding permission steps today (02:10)
+        • Make sure AirPods stay out of call mode by default (02:10)
+        Maya also offered to share the updated checklist in Linear before standup (03:25).
 ```
 
-For one-click setup, open Transcripted, go to **Agent**, and click **Connect**
-next to Claude Desktop, Claude Code, Codex, or Cursor. For anything else, copy
-the ready-made prompt from the **Something else** row. It tells your AI where
-your notes are.
+Open **Agent** in the sidebar and click **Connect** next to **Claude Desktop**, **Claude Code**, **Codex**, or **Cursor**. That wires up Transcripted's local, read-only MCP server—your AI can search and read your notes, but can't modify or delete anything. For any other AI app, click **Copy prompt** on the **Something else** row.
 
-**Connect** adds Transcripted's MCP server to that app. MCP is an open standard
-that lets AI apps use outside tools. Transcripted's tools can search and read
-your notes, but they can't change or delete anything. Setup details are in
-[docs/agent-connect.md](docs/agent-connect.md).
+If you also want your AI to search what you type across apps, you can opt into **Capture my writing** on the **Agent** page (off by default; password managers and secure fields are skipped, and secrets are scrubbed before saving). Setup details: [docs/agent-connect.md](docs/agent-connect.md).
 
-## Requirements
-
-- A Mac with Apple silicon (M1 or later)
-- macOS 26 Tahoe or later
-- About 700 MB download, speech models included
-- No account
-
-Autocomplete is optional. Turning it on downloads a 3.4 GB
-model. If your Mac has 16 GB of memory or more, you can pick a larger 5.6 GB
-model instead.
+<p align="center">
+  <img src="docs/screenshots/launch/transcripted-agent.png" width="800" alt="Transcripted Agent page with one-click Connect buttons for Claude Desktop, Claude Code, Codex, and Cursor">
+</p>
 
 ## Install
 
-1. [Download Transcripted](https://transcripted.app/download). It's signed,
-   notarized by Apple, and updates itself.
-2. Open the download and drag Transcripted into Applications.
-3. Open it and allow the microphone. For meetings, also allow **System Audio
-   Recording** so it can hear the other side of the call. Allow
-   **Accessibility** so the keyboard shortcuts work and dictation can paste
-   into other apps. **Calendar** is optional, for meeting reminders.
-4. Click the menu bar icon and choose **Record**, or hold **Right Option**
-   to dictate (tap it instead to keep listening, then tap again to paste).
+**Requirements:** Apple Silicon Mac (M1 or later) · macOS 26 Tahoe or later · ~700 MB download (speech models included) · No account required.
+
+### Direct download
+
+1. [Download Transcripted](https://transcripted.app/download) — signed, Apple-notarized, and auto-updating via Sparkle.
+2. Open the DMG and drag **Transcripted** to **Applications**.
 
 ### Homebrew
 
@@ -152,94 +131,70 @@ brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
 brew install --cask transcripted
 ```
 
-Then do steps 3 and 4 above.
+### First launch & permissions
+
+Transcripted only asks for the macOS permissions needed for what you use:
+
+- **Dictation:** Microphone + Accessibility (for shortcuts and pasting into apps)
+- **Meetings:** adds System Audio Recording (to capture the other side of calls)
+- **Meeting reminders (optional):** Calendar
+
+Once open:
+- **Record a meeting:** Click the menu bar icon and choose **Record** (or accept the call-detection prompt).
+- **Dictate:** Hold **Right Option** and speak, or tap once to keep listening and tap again to paste.
+
+> Turning on optional on-device **Titles and summaries** in Settings downloads a 3.1 GB local model once and runs it entirely on your Mac.
 
 ## Privacy
 
-- Your audio, transcripts, and voice profiles never leave your Mac.
-- The app keeps meeting audio so you can replay any line. You can have it
-  deleted after 7 or 30 days. Transcripts stay.
-- The app sends anonymous crash reports (Sentry) and usage stats (PostHog).
-  Both are on by default, and you can turn them off in **Settings → Privacy**.
-  They never include audio, transcripts, meeting titles, speaker names, or file
-  paths. The
-  [privacy contract](docs/privacy-first-observability.md#privacy-contract) has
-  the full list.
-- Writing never sends your text. It sends only counts, like how many
-  suggestions you took, and which Writing options you chose. The same usage
-  stats switch turns those off.
-- Autocomplete uses the macOS Screen Recording permission to read the text on
-  your screen, mostly the window you're typing in. That text stays in memory
-  on your Mac and is never saved.
-- If you connect a cloud AI like Claude, the notes it reads go to that AI's
-  servers. Transcripted itself never uploads them.
+- **Local by default.** Your audio, transcripts, and voice profiles never leave your Mac.
+- **Retained audio stays under your control.** Meeting audio is kept so you can replay any line (set auto-delete to 7 days, 30 days, or Forever in **Settings → Library**). Dictation audio is kept for 30 days by default (set to Don't keep, 7 days, 30 days, or Forever). Deleting audio never deletes your Markdown transcripts.
+- **Optional Capture my writing** is off by default. Password managers and secure fields are never captured, secrets are scrubbed locally before saving, and nothing you type is ever sent off-device.
+- **Anonymous diagnostics.** Crash reports (Sentry) and anonymous usage stats (PostHog) are on by default and can be turned off with one switch in **Settings → Privacy**. They never include audio, transcripts, meeting titles, speaker names, typed text, or file paths. See the full [privacy contract](docs/privacy-first-observability.md#privacy-contract).
+- **Connected cloud AIs.** If you connect Claude, Codex, or another cloud AI, the notes you ask it to read go to that provider. Transcripted itself never uploads them.
 
-Where everything is stored: [docs/storage-paths.md](docs/storage-paths.md).
+Full storage layout: [docs/storage-paths.md](docs/storage-paths.md).
 
 ## FAQ
 
 **How is it different from Otter, Fireflies, or Granola?**
-Otter and Fireflies are built around a bot that joins your calls, and they keep
-your meetings in their cloud. Granola skips the bot, but your meetings still go
-to the cloud. Transcripted does it all on your Mac, and it's free and open
-source. More comparisons, including local apps like MacWhisper and Meetily:
-[transcripted.app/compare](https://transcripted.app/compare).
+Otter and Fireflies join your calls with a bot and store your meetings in their cloud. Granola skips the bot, but your meetings still go to their servers. Transcripted transcribes everything locally on your Mac as plain Markdown, and it's free and open source. More comparisons (including MacWhisper and Meetily): [transcripted.app/compare](https://transcripted.app/compare).
 
 **Does it write summaries?**
-It saves the full transcript, not an AI summary. For a summary, decisions, or
-action items, ask your AI. It answers from your notes.
+Yes, if you want it to. By default Transcripted saves the full transcript and lets you ask your connected AI for summaries, decisions, or action items. If you want automatic summaries built in, turn on **Titles and summaries** in Settings—it downloads a 3.1 GB local model and generates titles and summaries completely on-device.
 
 **Does it work offline?**
-Yes. Recording, transcription, and speaker labels need no internet. The app
-only goes online to check for updates, download optional models, and send the
-crash reports and usage stats above.
+Yes. Recording, transcription, speaker labeling, and on-device summaries work with no internet connection. The app only goes online to check for updates, download optional models, and send anonymous crash/usage telemetry (if enabled).
 
 **What languages does it understand?**
-The default model, Parakeet V3, covers 25 European languages, English
-included. For others, pick a Whisper model in **Settings → Transcription**. It
-downloads once, then runs on your Mac too.
+The default **Parakeet V3** model covers 25 European languages, including English. For other languages, switch to **Whisper Large V3 Turbo** under **Settings → Advanced → Transcription**—it downloads once and runs locally too.
 
 **How accurate is it?**
-Good for notes and search, but not perfect. Names and jargon are the usual
-misses. If it keeps mishearing a word, add a fix under **Settings →
-Transcription → Corrections** (for example, "okay ours" to "OKRs").
+Strong enough for daily notes and AI search, though uncommon names and jargon can still slip. Add persistent fixes under **Settings → Advanced → Transcription → Corrections** (for example, `"okay ours"` → `"OKRs"`).
 
 **Do people know I'm recording?**
-Only if you tell them. There's no bot, so the app doesn't notify anyone. Tell
-people before you record. In many places, the law requires their consent.
+Only if you tell them. There's no meeting bot, so Transcripted does not notify other participants. Always get consent before recording where required by law or courtesy.
 
 **What does it cost?**
-Nothing. No account, no subscription.
+Nothing. Free, MIT-licensed open source—no account, no subscription.
 
 **Is there a command-line tool?**
-Yes, it ships inside the app. See the [CLI instructions](Tools/TranscriptedCLI/README.md).
+Yes, `transcripted-cli` ships right inside the app bundle. See [Tools/TranscriptedCLI/README.md](Tools/TranscriptedCLI/README.md).
 
-## Uninstall
+<details>
+<summary><strong>Uninstall</strong></summary>
 
 1. Quit Transcripted from the menu bar.
-2. If you set up Writing, go to **System Settings → Keyboard → Input
-   Sources** and remove Transcripted.
-3. Drag Transcripted out of Applications, or run
-   `brew uninstall --cask transcripted`.
-4. Delete the Transcripted Keyboard, if it's there:
-   `~/Library/Input Methods/Transcripted Keyboard.app`
+2. Drag Transcripted out of **Applications**, or run `brew uninstall --cask transcripted`.
+3. If you enabled **Capture my writing**, also remove Transcripted under **System Settings → Keyboard → Input Sources** and delete `~/Library/Input Methods/Transcripted Keyboard.app` if present.
 
-Your meetings, dictations, and writing stay where they are. To also delete the
-Autocomplete model and Writing's data, remove these folders:
+Your saved meetings and dictations stay untouched. To delete all local app state, models, and voice profiles (plus your notes if they're still in the default folder), remove `~/Library/Application Support/Transcripted/`.
 
-```text
-~/Library/Application Support/Transcripted/models/writing/
-~/Library/Application Support/Transcripted/writing/
-```
-
-To remove everything, including voice profiles, delete
-`~/Library/Application Support/Transcripted/`. That also deletes your notes if
-they're still in the default folder.
+</details>
 
 ## Build and contribute
 
-It's a native Swift app. You need an Apple silicon Mac on macOS 26 or later
-with Xcode 26 or later.
+Transcripted is a native Swift macOS app. Building from source requires an Apple Silicon Mac on macOS 26+ with Xcode 26+.
 
 ```bash
 bash build-deps.sh
@@ -247,13 +202,13 @@ bash build.sh --no-open
 bash run-tests.sh
 ```
 
-Start with [CONTRIBUTING.md](CONTRIBUTING.md). Coding agents start with
-[AGENTS.md](AGENTS.md). Security reports go to [SECURITY.md](SECURITY.md).
+- Contributors: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Questions & ideas: [GitHub Discussions](https://github.com/r3dbars/transcripted/discussions)
+- Coding agents: [AGENTS.md](AGENTS.md)
+- Security reports: [SECURITY.md](SECURITY.md)
 
-If Transcripted is useful to you, a star helps other people find it. You can
-also [sponsor the project](https://github.com/sponsors/r3dbars).
+If Transcripted is useful to you, giving the repo a star helps other Mac users find it.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Bundled third-party code is listed in
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+MIT. See [LICENSE](LICENSE). Bundled third-party components are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

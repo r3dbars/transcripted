@@ -1,19 +1,17 @@
 # Changelog
 
-All notable user-facing changes to Transcripted are documented here. The format
-loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
-the project uses semantic-ish versioning (`MAJOR.MINOR.PATCH`).
+> **Current release notes (1.1.51 and later):** Per-version release notes, signed DMGs, and updates live on [GitHub Releases](https://github.com/r3dbars/transcripted/releases).
+>
+> This file keeps the historical changelog through `1.1.50` plus an unattributed post-`1.1.50` engineering rollup below.
 
-Release downloads and signed DMGs live on the
-[GitHub Releases](https://github.com/r3dbars/transcripted/releases) page. The
-appcast for in-app Sparkle updates is the `appcast.xml` asset of the latest
+The appcast for in-app Sparkle updates is the `appcast.xml` asset of the latest
 release (older builds read the frozen legacy
 [`docs/appcast.xml`](docs/appcast.xml)).
 
 Entries marked **[CRITICAL]** are flagged as `sparkle:criticalUpdate` and are
 force-installed by Sparkle so existing users recover from a regression.
 
-## [Unreleased]
+## Post-1.1.50 Rollup (see GitHub Releases for per-version notes)
 
 ### Fixed
 - Dragging the main window onto another display no longer jumps it away from

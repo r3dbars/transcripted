@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, Setup Help & Ideas
+    url: https://github.com/r3dbars/transcripted/discussions
+    about: Ask a question, share an Obsidian/AI workflow, or discuss ideas in GitHub Discussions.
+  - name: Security Vulnerability
+    url: https://github.com/r3dbars/transcripted/security/advisories/new
+    about: Report a security issue privately through GitHub Security Advisories.
+  - name: Website & Docs
+    url: https://transcripted.app
+    about: Downloads, interactive demo, and comparisons with other tools.

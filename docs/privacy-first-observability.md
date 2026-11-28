@@ -69,9 +69,7 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
 6. Run `bash build.sh --no-open` and `bash run-tests.sh`.
-7. In the app, verify onboarding shows two separate default-on questions for:
-   - crash and error reports
-   - anonymous usage statistics
+7. In the app, verify onboarding shows the telemetry disclosure ("Anonymous crash and usage stats help us fix bugs. Turn them off in Settings.").
 8. Verify Settings also shows separate toggles for:
    - crash and error reports
    - anonymous usage statistics

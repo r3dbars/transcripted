@@ -412,10 +412,10 @@ def check_policy_anchors(root: Path) -> list[Finding]:
         ".github/PULL_REQUEST_TEMPLATE.md": (
             "No private transcripts, audio, tokens, personal paths, or customer data are included",
         ),
-        ".github/ISSUE_TEMPLATE/bug_report.md": (
+        ".github/ISSUE_TEMPLATE/bug_report.yml": (
             "Please redact transcripts, audio, meeting titles, speaker names, emails, tokens",
         ),
-        ".github/ISSUE_TEMPLATE/feature_request.md": (
+        ".github/ISSUE_TEMPLATE/feature_request.yml": (
             "Please do not include private transcripts, audio, meeting titles, speaker names",
         ),
         "docs/qa-test-bench.md": (

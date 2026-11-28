@@ -16,10 +16,9 @@ helper. Agents we cannot configure directly use the universal copy-prompt row.
 ## Claude Desktop
 
 1. Open Transcripted.
-2. Open Settings.
-3. Go to `Agent`.
-4. Click `Connect` on the Claude Desktop row.
-5. Restart Claude Desktop.
+2. Open **Agent** in the sidebar.
+3. Click `Connect` on the Claude Desktop row.
+4. Restart Claude Desktop.
 
 After restart, ask Claude:
 
@@ -74,7 +73,7 @@ Current `transcripted-mcp` saved-context and diagnostic tools:
 
 `status` reports the helper version, resolved directories, and index counts.
 
-Agents can read what you wrote, too, if Save my writing is on.
+Agents can read what you wrote, too, if **Capture my writing** is on.
 `list_writing` and `read_writing` open the daily `Writing_<date>.md` files.
 `search` and `recent_context` include writing by default; pass
 `kind: "writing"` to get only writing. Writing search is full text only, not
@@ -134,33 +133,29 @@ can also use Transcripted's on-device Parakeet model to turn arbitrary audio
 or video files into plain text — downloaded talks, screen recordings, voice
 memos — without creating a meeting in the app.
 
-This is a contributor/source-build surface for now. From a repo checkout:
+`transcripted-cli` ships right inside the Transcripted app bundle—no source build required for DMG or Homebrew installs:
 
 ```bash
-bash build-deps.sh
-cd Tools/TranscriptedCLI
-TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift build -c release
-```
+CLI="/Applications/Transcripted.app/Contents/Helpers/transcripted-cli"
 
-Then point the agent at the built binary:
-
-```bash
 # plain text to stdout — "just give me the words"
-./.build/release/transcripted-cli transcribe ~/Downloads/talk.mp4
+"$CLI" transcribe ~/Downloads/talk.mp4
 
 # a folder of downloaded videos, one .txt per file
-./.build/release/transcripted-cli transcribe ~/Downloads/videos/*.mp4 --output-dir ~/Downloads/transcripts
+"$CLI" transcribe ~/Downloads/videos/*.mp4 --output-dir ~/Downloads/transcripts
 
 # JSON with timestamped segments, or SRT subtitles
-./.build/release/transcripted-cli transcribe interview.m4a --json
-./.build/release/transcripted-cli transcribe talk.mov --srt --output talk.srt
+"$CLI" transcribe interview.m4a --json
+"$CLI" transcribe talk.mov --srt --output talk.srt
 ```
+
+If you're building from source instead, run `bash build-deps.sh` and `cd Tools/TranscriptedCLI && TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift build -c release` to produce `./.build/release/transcripted-cli`.
 
 Everything runs locally. The CLI reuses the Parakeet models the Transcripted
 app already has — the installed app bundle first, then the shared
 `~/Library/Application Support/FluidAudio/Models/` cache — and only downloads
 them (~600MB, one time) when neither exists. See
-`Tools/TranscriptedCLI/AGENTS.md` for the full command reference.
+`Tools/TranscriptedCLI/README.md` for the full command reference.
 
 ## Fallback Only: Web Chat
 

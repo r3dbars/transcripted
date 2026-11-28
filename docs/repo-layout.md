@@ -76,7 +76,6 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.github/` — issue templates, PR template, and repository workflows
 - `.githooks/` — git hooks (`commit-msg`, `pre-push`, the public-repo guard); see the Docs Map entry below
 - `.claude/` — Claude Code settings, skills, slash commands, subagents and the `stop-lint.sh` Stop hook
-- `.claude-plugin/` — Claude Code plugin marketplace manifest (currently empty)
 - `.codex/` — the Codex environment; its Run action calls `script/build_and_run.sh --verify`
 - `script/` — `build_and_run.sh`, local build-and-launch entrypoint with a running-app guard
 - `AppIcon/` — the app icon source (`Transcripted.icon`)

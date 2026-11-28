@@ -1,0 +1,37 @@
+name: Feature Request
+description: Suggest an improvement or new capability for Transcripted
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Meetings
+        - Dictation
+        - Speakers / Who spoke?
+        - Agent / MCP
+        - Audio or video file import
+        - Privacy / Local-first
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow or friction you're running into today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would feel better?
+      description: The simplest version of the change that would help.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context (optional)
+      description: Examples, mockups, or tools you use alongside Transcripted (Obsidian, Claude, Codex, etc.). Please do not include private transcripts, audio, meeting titles, speaker names, or personal data.
