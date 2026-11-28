@@ -147,7 +147,7 @@ func testClipboardRestoringTextPaster() async {
                 return .value(data)
             }
             assertEqual(reads, 2, "later items must not trigger fetches after the total budget")
-            assertFalse(incomplete.isComplete, "an item with no saved representation must still block destructive paste")
+            assertFalse(incomplete.isComplete, "an item with no saved representation marks the snapshot incomplete")
         }
 
         runSuite("ClipboardRestoringTextPaster preserves a clipboard changed during lazy snapshot") {
@@ -786,7 +786,7 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
-        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — incomplete snapshots do not clear clipboard") {
+        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — restores captured text from an incomplete snapshot") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
             let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
@@ -818,10 +818,36 @@ func testClipboardRestoringTextPaster() async {
             assertEqual(restoredItems.count, 1, "restore should keep cheap textual data without re-materializing custom data")
             assertEqual(
                 restoredItems.first?.string(forType: .string),
-                temporary,
-                "incomplete snapshots should leave the temporary clipboard untouched instead of clearing it"
+                originalString,
+                "restorable text captured next to an oversized item comes back after paste"
             )
             assertNil(restoredItems.first?.data(forType: customType), "oversized data should not be eagerly snapshotted")
+        }
+
+        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — leaves dictation when nothing restorable was captured") {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let promiseType = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
+            let promiseItem = NSPasteboardItem()
+            promiseItem.setData(Data([1]), forType: promiseType)
+            _ = board.writePasteboardItems([promiseItem])
+            let paster = ClipboardRestoringTextPaster()
+            let snapshot = paster.snapshotPasteboardItems(from: board, readType: { _, _, _ in .value(Data([1])) })
+            assertFalse(snapshot.isComplete, "a pure file-promise snapshot is incomplete")
+            assertFalse(snapshot.hasRestorableCapturedData, "file-promise types are not captured")
+
+            _ = board.setString("temporary dictation", forType: .string)
+            let temporaryChangeCount = board.changeCount
+            paster.restorePasteboardItems(
+                snapshot,
+                temporaryString: "temporary dictation",
+                temporaryChangeCount: temporaryChangeCount,
+                to: board
+            )
+            assertEqual(
+                board.string(forType: .string),
+                "temporary dictation",
+                "with nothing to restore, the dictation recovery copy stays on the clipboard"
+            )
         }
 
         runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — an item keeps its cheap types when a heavy one is skipped") {
@@ -1059,21 +1085,25 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed(
-                    "Transcripted sent paste, but could not confirm it or place a recovery copy on the clipboard. Check your dictation history.",
-                    reason: .fallbackClipboardRecoveryUnverified
+                .copied(
+                    ClipboardRestoringTextPaster.pasteNotConfirmedMessage,
+                    reason: .pasteNotConfirmed
                 ),
-                "an unconfirmed paste must not claim copied delivery after a rich user copy"
+                "an unconfirmed paste must put the dictation back when the rewrite has no string"
             )
             assertEqual(
-                pasteboard.pasteboardItems?.first?.data(forType: richType),
-                richData,
-                "a rich user clipboard change should remain untouched"
+                pasteboard.string(forType: .string),
+                "synthetic unconfirmed dictation",
+                "a rich-only rewrite must not drop the transcript"
             )
             assertEqual(
                 paster.lastConfirmationDiagnostic?.context["clipboard_fallback_state"],
-                "clipboard_changed",
-                "a non-text clipboard item is changed, not empty"
+                "dictation_present",
+                "recopying the dictation over a non-text rewrite is verified recovery"
+            )
+            assertNil(
+                pasteboard.pasteboardItems?.first?.data(forType: richType),
+                "the recovery copy is plain dictation text, not the rich rewrite"
             )
         }
 
@@ -1649,7 +1679,7 @@ func testClipboardRestoringTextPaster() async {
         }
     }
 
-    await runSuite("A clipboard snapshot that times out returns within the bound, leaves the clipboard, and tags timeout") {
+    await runSuite("A clipboard snapshot that times out returns within the bound and still pastes") {
         await MainActor.run {
             var waited: TimeInterval?
             var fetchRan = false
@@ -1664,12 +1694,8 @@ func testClipboardRestoringTextPaster() async {
                 "the reader is asked to finish within the named snapshot bound"
             )
             assertTrue(fetchRan, "the timed reader must be used instead of an unbounded pasteboard read")
-            assertFalse(result.dispatched, "a timed-out snapshot must not send Cmd+V")
-            assertEqual(
-                result.board.string(forType: .string),
-                "keep the user's clipboard",
-                "a timed-out snapshot must not clear or replace the user's clipboard"
-            )
+            assertTrue(result.dispatched, "a timed-out lazy clipboard must still send Cmd+V")
+            assertEqual(result.outcome, .pasted, "exotic timeout is not a delivery failure")
             assertEqual(
                 ClipboardSnapshotReader.read(
                     remaining: TranscriptedConstants.clipboardSnapshotReadTimeout,
@@ -1685,30 +1711,48 @@ func testClipboardRestoringTextPaster() async {
                 .timedOut,
                 "an unfinished snapshot read is a timeout, not a nil read"
             )
-            assertClipboardSnapshotCauseMaps(.timeout, from: result)
         }
     }
 
-    await runSuite("A focus-moved fallback refuses a timed-out snapshot and leaves the clipboard") {
+    await runSuite("A focus-moved fallback copies dictation when the snapshot times out") {
         await MainActor.run {
-            assertClipboardSnapshotCauseMaps(
-                .timeout,
-                from: pasteClipboardSnapshotCause(
-                    target: DictationPasteTarget(
-                        processIdentifier: Int32.max,
-                        bundleIdentifier: "com.example.NotFrontmost"
-                    ),
-                    activationWait: 0
-                ) { _, _, _ in .timedOut }
+            let result = pasteClipboardSnapshotCause(
+                target: DictationPasteTarget(
+                    processIdentifier: Int32.max,
+                    bundleIdentifier: "com.example.NotFrontmost"
+                ),
+                activationWait: 0
+            ) { _, _, _ in .timedOut }
+            assertFalse(result.dispatched, "focus already moved, so Cmd+V is not sent")
+            assertEqual(
+                result.outcome,
+                .copied(
+                    "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
+                    reason: .focusChanged
+                ),
+                "a timed-out exotic clipboard still gets a manual-copy fallback"
+            )
+            assertEqual(
+                result.board.string(forType: .string),
+                "dictation",
+                "the transcript stays on the clipboard for ⌘V"
             )
         }
     }
 
-    await runSuite("An Accessibility-off fallback refuses a timed-out snapshot and leaves the clipboard") {
+    await runSuite("An Accessibility-off fallback copies dictation when the snapshot times out") {
         await MainActor.run {
-            assertClipboardSnapshotCauseMaps(
-                .timeout,
-                from: pasteClipboardSnapshotCause(accessibilityTrusted: { false }) { _, _, _ in .timedOut }
+            let result = pasteClipboardSnapshotCause(accessibilityTrusted: { false }) { _, _, _ in .timedOut }
+            assertFalse(result.dispatched, "Accessibility is off, so Cmd+V is not sent")
+            assertEqual(
+                result.outcome.copyReason,
+                .accessibilityMissing,
+                "the usual Accessibility-off copy path still runs"
+            )
+            assertEqual(
+                result.board.string(forType: .string),
+                "dictation",
+                "the transcript stays on the clipboard for ⌘V"
             )
         }
     }
@@ -1745,20 +1789,17 @@ func testClipboardRestoringTextPaster() async {
             )
             secondReads = 0
             board.resetMutationCounts()
-            assertClipboardSnapshotCauseMaps(
-                .timeout,
-                from: pasteClipboardSnapshotCause(original: "keep first", board: board, readType: readType),
-                expectedClipboard: "keep first"
-            )
+            let pasteResult = pasteClipboardSnapshotCause(original: "keep first", board: board, readType: readType)
+            assertTrue(pasteResult.dispatched, "a later-item timeout must not skip Cmd+V")
+            assertEqual(pasteResult.outcome, .pasted, "a partial timeout still delivers the dictation")
         }
     }
 
-    await runSuite("An unreadable clipboard item uses the unreadable hint and tags unreadable") {
+    await runSuite("An unreadable clipboard item still pastes") {
         await MainActor.run {
-            assertClipboardSnapshotCauseMaps(
-                .unreadable,
-                from: pasteClipboardSnapshotCause { _, _, _ in .value(nil) }
-            )
+            let result = pasteClipboardSnapshotCause { _, _, _ in .value(nil) }
+            assertTrue(result.dispatched, "unreadable exotic types must not skip Cmd+V")
+            assertEqual(result.outcome, .pasted, "unreadable exotic types are not a delivery failure")
         }
     }
 
@@ -3244,7 +3285,7 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
-    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — skips file-promise types when restorable types exist, refuses pure promises") {
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — skips file-promise types when restorable types exist") {
         let promiseType = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
         await MainActor.run {
             let board = FakeClipboardPasteboard(initialString: nil)
@@ -3270,9 +3311,22 @@ func testClipboardRestoringTextPaster() async {
                 pureReads += 1
                 return .value(Data([1]))
             })
-            assertFalse(pureSnapshot.isComplete, "a pure file-promise item must refuse paste-back instead of clobbering the clipboard")
-            assertEqual(pureSnapshot.incompleteCause, .unreadable, "pure file-promise refusal carries unreadable cause")
-            assertEqual(pureReads, 0, "pure file-promise item should refuse without triggering promise export")
+            assertFalse(pureSnapshot.isComplete, "a pure file-promise item cannot be restored from raw data")
+            assertEqual(pureSnapshot.incompleteCause, .unreadable, "pure file-promise snapshot carries unreadable cause")
+            assertEqual(pureReads, 0, "pure file-promise item should skip without triggering promise export")
+
+            var dispatched = false
+            let outcome = ClipboardRestoringTextPaster().paste(
+                "dictation",
+                pasteboard: board,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { dispatched = true; return true },
+                pasteConfirmed: { true },
+                restoreDelay: 0
+            )
+            assertTrue(dispatched, "a pure file-promise clipboard must still send Cmd+V")
+            assertEqual(outcome, .pasted, "unreadable exotic types are not a delivery failure")
         }
     }
 
@@ -3332,6 +3386,30 @@ func testClipboardRestoringTextPaster() async {
             assertFalse(concealedSnapshot.isComplete, "a privacy marker alone must not make an item complete when its real payload failed to read")
             assertEqual(concealedSnapshot.incompleteCause, .unreadable, "failed password read must report unreadable")
             assertTrue(concealedSnapshot.containsPrivacyMarker, "privacy marker flag must still be set")
+            assertTrue(concealedSnapshot.privacyPayloadMissing, "a concealed payload that failed to read must be flagged")
+
+            var concealedDispatched = false
+            let concealedOutcome = ClipboardRestoringTextPaster().paste(
+                "dictation",
+                pasteboard: board,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { concealedDispatched = true; return true },
+                pasteConfirmed: { true },
+                snapshotRead: ClipboardSnapshotReadContext(
+                    timeout: TranscriptedConstants.clipboardSnapshotReadTimeout,
+                    now: { 0 },
+                    readType: { _, type, _ in
+                        type == concealed ? .value(Data()) : .value(nil)
+                    }
+                )
+            )
+            assertFalse(concealedDispatched, "a concealed password that could not be read must not be overwritten")
+            assertEqual(
+                concealedOutcome.failureReason,
+                .clipboardSnapshotIncomplete(.unreadable),
+                "password-manager copies still refuse paste-back"
+            )
 
             // P2-2: Empty string keeps its Data() type, allows unreadable dyn.* or file-promise secondary,
             // and refuses unreadable canonical secondary types like RTF.
@@ -3365,7 +3443,7 @@ func testClipboardRestoringTextPaster() async {
             let emptyCanonicalSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
                 type == .string ? .value(Data()) : .value(nil)
             })
-            assertFalse(emptyCanonicalSnapshot.isComplete, "an empty string next to an unreadable canonical RTF representation must refuse paste-back")
+            assertFalse(emptyCanonicalSnapshot.isComplete, "an empty string next to an unreadable canonical RTF representation is incomplete")
             assertEqual(emptyCanonicalSnapshot.incompleteCause, .unreadable, "unreadable canonical secondary must carry unreadable cause")
         }
     }
