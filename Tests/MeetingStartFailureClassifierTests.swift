@@ -340,6 +340,123 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("A granted microphone is not reported as a missing permission") {
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Microphone permission was not granted.",
+                stage: "microphone_graph",
+                microphoneGranted: true
+            ),
+            "mic_unavailable",
+            "APPLE-MACOS-20 events had mic_permission_granted=true; leftover permission copy is not a TCC denial"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Can't write to save folder. Check Finder permissions for the folder.",
+                microphoneGranted: true
+            ),
+            "unexpected",
+            "disk write permissions must not become a microphone permission miss"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "System Audio Recording is off. Turn it on for Transcripted in System Settings, then try again.",
+                stage: "system_audio",
+                microphoneGranted: true
+            ),
+            "permission_missing",
+            "a granted microphone does not hide a real System Audio Recording denial"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Microphone access denied. Go to System Settings → Privacy & Security → Microphone and enable Transcripted.",
+                microphoneGranted: true,
+                explicitMicrophoneDenial: true
+            ),
+            "permission_missing",
+            "a typed TCC denial still wins even if the snapshot has not caught up"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.kind(
+                from: "Recording failed to start. Try quitting and reopening Transcripted.",
+                stage: "microphone_permission",
+                microphoneGranted: true
+            ),
+            "permission_missing",
+            "the typed microphone-permission stage is a real TCC denial"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.microphoneGranted(from: ["mic_permission_granted": "true"]),
+            true
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.microphoneGranted(from: ["mic_permission_granted": "false"]),
+            false
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.microphoneGranted(from: ["mic_permission_granted": "unknown"]),
+            nil,
+            "an unread snapshot must not be treated as denied"
+        )
+    }
+
+    runSuite("Start-failure cause names Bluetooth unready separately from a permission miss") {
+        assertEqual(
+            MeetingStartFailureClassifier.cause(
+                kind: "mic_unavailable",
+                stage: "microphone_graph",
+                inputDeviceClass: "bluetooth",
+                selectionReason: "preservedDefaultInput",
+                stabilizationOutcome: "built_in_unavailable"
+            ),
+            "built_in_unavailable",
+            "a failed built-in lookup is more specific than bluetooth_unready"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.cause(
+                kind: "mic_unavailable",
+                stage: "microphone_graph",
+                inputDeviceClass: "bluetooth",
+                selectionReason: "preservedDefaultInput",
+                stabilizationOutcome: "not_needed"
+            ),
+            "bluetooth_unready",
+            "a Bluetooth mic that never became ready keeps its own cause"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.cause(
+                kind: "mic_unavailable",
+                stage: "microphone_graph",
+                inputDeviceClass: "built_in",
+                selectionReason: "noBuiltInFallbackAvailable",
+                stabilizationOutcome: "not_needed"
+            ),
+            "no_fallback_input",
+            "no other mic to fall back to is its own cause"
+        )
+        assertEqual(
+            MeetingStartFailureClassifier.cause(
+                kind: "permission_missing",
+                stage: "unknown",
+                inputDeviceClass: "bluetooth",
+                selectionReason: "preservedDefaultInput",
+                stabilizationOutcome: "not_needed",
+                message: "Microphone access denied.",
+                explicitMicrophoneDenial: true
+            ),
+            "mic_permission_denied",
+            "a typed TCC denial is never bluetooth_unready"
+        )
+        assertEqual(
+            MeetingStartFailureCopy.userMessage(
+                raw: "Recording failed to start: The microphone route did not become ready.",
+                cause: "bluetooth_unready"
+            ),
+            "The Bluetooth microphone did not become ready in time. Wait a moment and try again, or pick the Mac's microphone in Sound settings.",
+            "the person is told to wait or pick the Mac mic, not to toggle Microphone access"
+        )
+    }
+
     runSuite("Typed system-audio denial offers recovery without mislabeling silence") {
         assertTrue(
             MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
@@ -363,6 +480,25 @@ func testMeetingStartFailureClassifier() {
             !MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery()
                 && !MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(missingPermissions: ["microphone"]),
             "generic capture errors and microphone-only denial are not system-audio denial"
+        )
+        assertTrue(
+            MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery(
+                missingPermissions: ["microphone"]
+            ),
+            "a missing Microphone grant should offer the Microphone Settings pane"
+        )
+        assertTrue(
+            MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery(
+                explicitMicrophonePermissionDenialObserved: true
+            ),
+            "an actual capture Microphone denial should offer Settings"
+        )
+        assertTrue(
+            !MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery()
+                && !MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery(
+                    missingPermissions: ["system_audio_recording"]
+                ),
+            "a Bluetooth device miss and a system-audio denial are not a Microphone TCC denial"
         )
     }
 

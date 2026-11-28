@@ -137,7 +137,7 @@ final class NotchIslandDropView: NSView {
         case .meetingSaved(let title):
             // "Meeting saved · Saved to Meetings" said it twice.
             add(titleBlock(title ?? "Meeting saved", title == nil ? "" : "Saved to Meetings"))
-        case .meetingError(let title, let message, _, _):
+        case .meetingError(let title, let message, _, _, _):
             add(titleBlock(title, message, wrapsDetail: true))
         case .callPrompt(let title, let detail):
             add(titleBlock(title, detail))

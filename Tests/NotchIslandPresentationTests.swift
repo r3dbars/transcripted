@@ -390,6 +390,22 @@ func testNotchIslandPresentation() {
             ),
             "a confirmed System Audio denial carries its Settings action into the drop-down"
         )
+        let micDenied = NotchIslandMeetingContent(phase: .error(
+            title: "Turn on Microphone",
+            message: "Turn on Microphone for Transcripted in System Settings, then try again.",
+            canOpen: false,
+            grantsMicrophone: true
+        ))
+        assertEqual(
+            notchLayout(meeting: micDenied).drop,
+            .meetingError(
+                title: "Turn on Microphone",
+                message: "Turn on Microphone for Transcripted in System Settings, then try again.",
+                canOpen: false,
+                grantsMicrophone: true
+            ),
+            "a confirmed Microphone denial carries its Settings action into the drop-down"
+        )
         assertTrue(error.dropIsSticky)
     }
 

@@ -15,6 +15,8 @@ protocol MeetingCaptureControlling: AnyObject {
     var systemAudioFinalizationFailed: Bool { get }
     /// macOS explicitly refused system audio when this capture started.
     var systemAudioStartPermissionExplicitlyDenied: Bool { get }
+    /// macOS explicitly refused Microphone access when this capture started.
+    var microphoneStartPermissionExplicitlyDenied: Bool { get }
     /// Wait for the shared-meeting-mic dictation handler to finish its queue.
     func flushSharedDictationMicHandler() async
 }
@@ -27,6 +29,8 @@ struct MeetingCaptureHealthEvidence: Equatable {
     let systemAudioFinalizationFailed: Bool
     /// Show "Grant System Audio Access" only for a typed denial.
     let systemAudioPermissionRecoveryNeeded: Bool
+    /// Show Open Settings for Microphone only for a typed TCC denial.
+    let microphonePermissionRecoveryNeeded: Bool
 
     @MainActor
     static func make(capture: MeetingCaptureControlling) -> MeetingCaptureHealthEvidence {
@@ -35,6 +39,9 @@ struct MeetingCaptureHealthEvidence: Equatable {
             systemAudioFinalizationFailed: capture.systemAudioFinalizationFailed,
             systemAudioPermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferSystemAudioPermissionRecovery(
                 explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied
+            ),
+            microphonePermissionRecoveryNeeded: MeetingRecordingStartGate.shouldOfferMicrophonePermissionRecovery(
+                explicitMicrophonePermissionDenialObserved: capture.microphoneStartPermissionExplicitlyDenied
             )
         )
     }

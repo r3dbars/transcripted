@@ -14,6 +14,12 @@ force-installed by Sparkle so existing users recover from a regression.
 ## Post-1.1.50 Rollup (see GitHub Releases for per-version notes)
 
 ### Fixed
+- Meeting recording start no longer dies just because the selected or default
+  mic is a Bluetooth headset that isn't ready yet. Transcripted waits a moment
+  for the route to settle, retries the device list, uses a USB or built-in mic
+  when one is there, and if call audio is already flowing it keeps the meeting
+  instead of aborting. A real missing Microphone permission still says so and
+  offers System Settings.
 - Dragging the main window onto another display no longer jumps it away from
   the pointer. AppKit was snapping the window mid-drag to the last frame it
   remembered for that display.

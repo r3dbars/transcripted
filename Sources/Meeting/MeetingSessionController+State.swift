@@ -102,6 +102,9 @@ final class MeetingSessionController: ObservableObject {
     /// timed-out probe). The overlays offer Grant System Audio Access for it.
     /// Set with the `.error` it belongs to; message matching is not proof.
     private(set) var systemAudioPermissionRecoveryNeeded = false
+    /// The start failed because macOS denied Microphone access. Distinct from
+    /// a Bluetooth device that is not ready. The overlays offer Open Settings.
+    private(set) var microphonePermissionRecoveryNeeded = false
     /// The quiet "Mic only" note on the recording pill, set for a recording
     /// that never built the system-audio tap. See `MeetingMicOnlyNotice`.
     @Published var micOnlyNotice: MeetingMicOnlyNotice?
@@ -345,7 +348,8 @@ final class MeetingSessionController: ObservableObject {
     func transition(
         to newState: State,
         reason: StaticString,
-        systemAudioPermissionRecoveryNeeded: Bool = false
+        systemAudioPermissionRecoveryNeeded: Bool = false,
+        microphonePermissionRecoveryNeeded: Bool = false
     ) {
         #if DEBUG
         if !MeetingSessionStateMachine.isLegalTransition(from: state, to: newState) {
@@ -368,6 +372,7 @@ final class MeetingSessionController: ObservableObject {
             meetingActionIdentity = UUID()
         }
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
+        self.microphonePermissionRecoveryNeeded = microphonePermissionRecoveryNeeded
         recordingStateHooks(from: state, to: newState)
         state = newState
         switch newState {
@@ -400,14 +405,16 @@ final class MeetingSessionController: ObservableObject {
     func reportUnrelatedFailure(
         _ message: String,
         reason: StaticString,
-        systemAudioPermissionRecoveryNeeded: Bool = false
+        systemAudioPermissionRecoveryNeeded: Bool = false,
+        microphonePermissionRecoveryNeeded: Bool = false
     ) {
         guard MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: state) else { return }
         meetingActionIdentity = UUID()
         transition(
             to: .error(message),
             reason: reason,
-            systemAudioPermissionRecoveryNeeded: systemAudioPermissionRecoveryNeeded
+            systemAudioPermissionRecoveryNeeded: systemAudioPermissionRecoveryNeeded,
+            microphonePermissionRecoveryNeeded: microphonePermissionRecoveryNeeded
         )
     }
 

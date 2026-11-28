@@ -384,7 +384,43 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(AudioCaptureStartFailureStage.systemAudio.rawValue, "system_audio")
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneFile.rawValue, "microphone_file")
         XCTAssertEqual(AudioCaptureStartFailureStage.microphoneTapRaised.rawValue, "microphone_tap_raised")
+        XCTAssertEqual(AudioCaptureStartFailureStage.microphonePermission.rawValue, "microphone_permission")
         XCTAssertEqual(AudioCaptureStartFailureStage.unknown.rawValue, "unknown")
+    }
+
+    func testMicrophonePermissionDenialIsTypedSeparatelyFromADeviceMiss() {
+        XCTAssertTrue(
+            Audio.isMicrophonePermissionPreflightFailure(
+                "Microphone access denied. Go to System Settings → Privacy & Security → Microphone and enable Transcripted."
+            )
+        )
+        XCTAssertTrue(
+            Audio.isMicrophonePermissionPreflightFailure(
+                "Microphone permission required. Go to System Settings → Privacy & Security → Microphone and enable Transcripted, then try again."
+            )
+        )
+        XCTAssertFalse(
+            Audio.isMicrophonePermissionPreflightFailure(
+                "Can't write to save folder. Check Finder permissions for the folder."
+            ),
+            "a disk permission miss is not a Microphone TCC denial"
+        )
+        XCTAssertFalse(
+            Audio.isMicrophonePermissionPreflightFailure(
+                "No microphone found. Connect a microphone or headset and try again."
+            ),
+            "a missing device is not a permission miss"
+        )
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioMicPermissionDenial-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.recordMicrophonePermissionDenial(
+            "Microphone access denied. Go to System Settings → Privacy & Security → Microphone and enable Transcripted."
+        )
+        XCTAssertTrue(audio.microphoneStartPermissionExplicitlyDenied)
+        XCTAssertEqual(audio.startFailureStage, .microphonePermission)
     }
 
     func testStartClearsPreviousFailureStageBeforePreflightFailure() throws {

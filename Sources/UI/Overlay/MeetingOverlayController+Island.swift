@@ -52,6 +52,10 @@ extension MeetingOverlayController {
                 TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
                 return
             }
+            if meetingSession?.microphonePermissionRecoveryNeeded == true {
+                TranscriptedPermissionAccess.openSettings(for: .microphone)
+                return
+            }
             openMeetingsFromPill(transcriptURL: nil)
             return
         default:
@@ -179,7 +183,8 @@ extension MeetingOverlayController {
                     failureKind: MeetingFailureKind.classify(message: message),
                     hasFailedMeetingRowForError: hasFailedMeetingRowForCurrentError
                 ),
-                grantsSystemAudio: meetingSession?.systemAudioPermissionRecoveryNeeded == true
+                grantsSystemAudio: meetingSession?.systemAudioPermissionRecoveryNeeded == true,
+                grantsMicrophone: meetingSession?.microphonePermissionRecoveryNeeded == true
             )
         }
         let prompt = currentPrompt.map {

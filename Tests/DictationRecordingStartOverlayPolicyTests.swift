@@ -530,6 +530,7 @@ private final class SharedMicHandoffCaptureFake: MeetingCaptureControlling {
     let hasObservedSystemAudioSignal = false
     let systemAudioFinalizationFailed = false
     let systemAudioStartPermissionExplicitlyDenied = false
+    let microphoneStartPermissionExplicitlyDenied = false
 
     func flushSharedDictationMicHandler() async {
         events.append("flush")

@@ -94,7 +94,15 @@ struct NotchIslandMeetingContent: Equatable {
         case saved(title: String?)
         /// `grantsSystemAudio`: the start failed on a confirmed System Audio
         /// Recording denial, so the drop-down offers the Settings pane.
-        case error(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
+        /// `grantsMicrophone`: the start failed on a confirmed Microphone TCC
+        /// denial, so the drop-down offers that Settings pane instead.
+        case error(
+            title: String,
+            message: String,
+            canOpen: Bool,
+            grantsSystemAudio: Bool = false,
+            grantsMicrophone: Bool = false
+        )
     }
 
     struct Prompt: Equatable {
@@ -338,7 +346,13 @@ enum NotchIslandDrop: Equatable {
     case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, recordingID: UUID? = nil, micAction: NotchIslandAction? = nil)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
-    case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
+    case meetingError(
+        title: String,
+        message: String,
+        canOpen: Bool,
+        grantsSystemAudio: Bool = false,
+        grantsMicrophone: Bool = false
+    )
     case callPrompt(title: String, detail: String)
     case speakerReview(NotchIslandSpeakerReviewContent)
     /// Recording already started with only the mic; offer call audio.
@@ -350,7 +364,7 @@ enum NotchIslandDrop: Equatable {
         switch self {
         case .dictationMessage(let message): return "dictation-message:\(message.text)\(message.preview.map { "|\($0)" } ?? "")"
         case .meetingPrompt(let prompt): return "meeting-prompt:\(prompt.title)"
-        case .meetingError(let title, let message, _, _): return "meeting-error:\(title)|\(message)"
+        case .meetingError(let title, let message, _, _, _): return "meeting-error:\(title)|\(message)"
         case .callPrompt(let title, _): return "call:\(title)"
         case .speakerReview(let review): return "speaker-review:\(review.reviewID.uuidString)"
         case .meetingCallAudioAsk: return "meeting-call-audio-ask"
@@ -600,8 +614,14 @@ enum NotchIslandPresentation {
         if let prompt = meeting?.prompt {
             return .meetingPrompt(prompt)
         }
-        if case .error(let title, let message, let canOpen, let grantsSystemAudio)? = meeting?.phase {
-            return .meetingError(title: title, message: message, canOpen: canOpen, grantsSystemAudio: grantsSystemAudio)
+        if case .error(let title, let message, let canOpen, let grantsSystemAudio, let grantsMicrophone)? = meeting?.phase {
+            return .meetingError(
+                title: title,
+                message: message,
+                canOpen: canOpen,
+                grantsSystemAudio: grantsSystemAudio,
+                grantsMicrophone: grantsMicrophone
+            )
         }
         if let meeting, meeting.isRecording, meeting.asksAboutCallAudio, meeting.callAudioNote == .off {
             return .meetingCallAudioAsk

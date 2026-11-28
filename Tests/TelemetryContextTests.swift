@@ -21,6 +21,35 @@ func testTelemetryContext() {
         assertFalse(analytics.values.contains("Private content"), "content is excluded")
         assertNil(sentry["audio_path"], "audio paths are excluded")
     }
+
+    runSuite("Meeting start-failure cause reaches analytics and Sentry without becoming a common key") {
+        let properties = TelemetryContext.enrich(event: "meeting_recording_start_failed", properties: [
+            "failure_kind": "mic_unavailable",
+            "start_failure_stage": "microphone_graph",
+            "start_failure_cause": "bluetooth_unready",
+            "session_id": UUID().uuidString,
+            "correlation_id": UUID().uuidString,
+            "input_device_class": "bluetooth",
+            "output_device_class": "built_in",
+            "selection_reason": "preservedDefaultInput",
+            "trigger": "hotkey",
+        ], environment: permissions)
+        let analytics = AnalyticsPayloadSanitizer.sanitizeProperties(
+            properties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_recording_start_failed")?.allowedProperties ?? []
+        )
+        let sentry = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_start_failed",
+            context: properties
+        )
+        assertEqual(analytics["start_failure_cause"], "bluetooth_unready")
+        assertEqual(sentry["start_failure_cause"], "bluetooth_unready")
+        assertTrue(
+            !TelemetryContext.keys.contains("start_failure_cause"),
+            "the cause is meeting-start specific; requiring it on every failure would invent it"
+        )
+    }
     runSuite("Health and friction distinguish unknown metadata from success") {
         let health = TelemetryContext.enrich(event: "meeting_capture_health_snapshot", properties: [:], environment: permissions)
         assertEqual(health["quality_reason"], "unknown", "missing measurements never imply good health")

@@ -35,6 +35,9 @@ final class MeetingCaptureBridge: ObservableObject {
     var systemAudioStartPermissionExplicitlyDenied: Bool {
         audio.systemAudioStartPermissionExplicitlyDenied
     }
+    var microphoneStartPermissionExplicitlyDenied: Bool {
+        audio.microphoneStartPermissionExplicitlyDenied
+    }
     var hasObservedSystemAudioSignal: Bool { audio.hasObservedSystemAudioSignal }
     /// Which of Core's own stop paths ended the recording, as a telemetry
     /// category; nil when no Core-side stop was recorded.
@@ -241,6 +244,11 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.enableVoiceProcessing = micPlan.enableVoiceProcessing
         audio.enableSoftwareAGC = micPlan.enableSoftwareAGC
         audio.usesPinnedMicrophoneCapture = micPlan.usesPinnedMicrophoneCapture
+        if audio.shouldSettleMeetingInputBeforeStart() {
+            try? await Task.sleep(
+                nanoseconds: UInt64(MeetingStartMicFallbackPolicy.deviceLookupRetryDelay * 1_000_000_000)
+            )
+        }
 
         let started = await withCheckedContinuation { continuation in
             for pending in startAttempt.reset() {
@@ -255,6 +263,21 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard let self else { return }
                 let waiters = self.startAttempt.resetIfCurrent(attemptID)
                 guard !waiters.isEmpty else { return }
+                if MeetingCaptureStartTimeout.shouldKeepRecording(
+                    isRecording: self.audio.isRecording,
+                    micStreaming: self.audio.micAudioStreaming,
+                    systemStreaming: self.audio.systemAudioStreaming,
+                    inputDeviceClass: self.audio.createPipelineDiagnosticsSnapshot().inputDeviceClass,
+                    requiresSystemAudio: self.pendingStartRequiresSystemAudio
+                ) {
+                    AppLogger.audioMic.warning(
+                        "Meeting start kept system audio while the Bluetooth microphone was still settling"
+                    )
+                    for continuation in waiters {
+                        continuation.resume(returning: true)
+                    }
+                    return
+                }
                 let timeoutStage = AudioCaptureStartState.timeoutFailureStage(
                     micAudioStreaming: self.audio.micAudioStreaming,
                     systemAudioStreaming: self.audio.systemAudioStreaming,
@@ -525,32 +548,18 @@ final class MeetingCaptureBridge: ObservableObject {
     /// budget; a known-grant start still uses 12s. If a denial already landed
     /// before that deadline, keep it.
     private func startTimeoutFailureMessage() -> String {
-        let existing = [errorMessage, audio.error]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty }
-
-        if let existing, Self.namesPermissionDenial(existing) {
-            return existing
-        }
-        if audio.systemAudioStartPermissionExplicitlyDenied {
-            return existing ?? "Turn on System Audio Recording before recording a meeting."
-        }
-        return AudioCaptureStartState.timeoutFailureMessage(
-            existingErrorMessage: existing,
+        MeetingCaptureStartTimeout.failureMessage(
+            bridgeError: errorMessage,
+            audioError: audio.error,
+            microphoneGranted: MeetingStartFailureClassifier.microphoneGranted(
+                from: TelemetryPermissionSnapshot.shared.current()
+            ),
+            explicitMicrophoneDenial: audio.microphoneStartPermissionExplicitlyDenied,
+            explicitSystemAudioDenial: audio.systemAudioStartPermissionExplicitlyDenied,
             micAudioStreaming: audio.micAudioStreaming,
             systemAudioStreaming: audio.systemAudioStreaming,
             requiresSystemAudio: pendingStartRequiresSystemAudio
         )
-    }
-
-    private static func namesPermissionDenial(_ message: String) -> Bool {
-        let normalized = message.lowercased()
-        if MeetingStartFailureClassifier.kind(from: normalized) == "permission_missing" {
-            return true
-        }
-        return normalized.contains("denied")
-            || normalized.contains("turn on microphone")
-            || normalized.contains("turn on system audio")
     }
 
     private func finishPendingStartAttemptIfPossible() {

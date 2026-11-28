@@ -9,6 +9,10 @@ public enum AudioCaptureStartFailureStage: String, Equatable, Sendable {
     /// change mid-start). Kept apart from `microphoneGraph` so the field can
     /// tell caught crashes from ordinary graph failures.
     case microphoneTapRaised = "microphone_tap_raised"
+    /// macOS refused Microphone access for this start (TCC denied or the
+    /// user declined the prompt). Kept apart from `microphoneGraph` so a
+    /// Bluetooth device that is not ready is not tagged as a permission miss.
+    case microphonePermission = "microphone_permission"
     case unknown = "unknown"
 }
 

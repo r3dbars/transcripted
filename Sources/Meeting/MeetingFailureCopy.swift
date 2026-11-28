@@ -28,6 +28,18 @@ struct MeetingFailureCopy: Equatable {
                 detail: "Turn on Microphone for Transcripted in System Settings, then try again."
             )
         case .microphoneStartFailed:
+            if message.contains("bluetooth") {
+                return MeetingFailureCopy(
+                    title: "Mic didn't start",
+                    detail: "The Bluetooth microphone isn't ready. Wait a moment and try again, or pick the Mac's microphone in Sound settings."
+                )
+            }
+            if message.contains("wait for bluetooth") {
+                return MeetingFailureCopy(
+                    title: "Mic didn't start",
+                    detail: "Connect a mic or wait for Bluetooth to finish switching, then try again."
+                )
+            }
             return MeetingFailureCopy(
                 title: "Mic didn't start",
                 detail: "Check your mic, then try again."

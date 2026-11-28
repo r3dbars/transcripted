@@ -223,6 +223,7 @@ stabilization_outcome
 stage
 stall_kind
 stall_stage
+start_failure_cause
 start_failure_stage
 start_latency_ms
 start_retry

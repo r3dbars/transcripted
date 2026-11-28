@@ -391,6 +391,17 @@ enum MeetingInputDeviceSelectionPolicy {
             return 4
         }
 
+        // A USB or wired mic is a safe fallback when the default input is a
+        // Bluetooth headset and this Mac has no built-in mic (a Mac mini, or
+        // a closed lid with no display mic). Ranked after real built-in
+        // devices so a MacBook still prefers its own microphone.
+        if device.transport == .usb {
+            if normalized.contains("microphone") || normalized.contains("mic") {
+                return 5
+            }
+            return 6
+        }
+
         return Int.max
     }
 
@@ -446,17 +457,23 @@ extension Audio {
     @discardableResult
     func pinBuiltInMeetingInputFallback(operation: String) -> Bool {
         let failedSelection = meetingInputSelectionSnapshot()
-        let fallback: MeetingInputDeviceSelection?
-        do {
-            fallback = try MeetingInputDeviceLookup.builtInFallbackAfterFailure(
-                failedInputID: failedSelection?.selectedInput.id
-            )
-        } catch {
-            AppLogger.audioMic.warning("Built-in microphone fallback unavailable", [
-                "operation": operation,
-                "error": error.localizedDescription
-            ])
-            return false
+        func lookupFallback() -> MeetingInputDeviceSelection? {
+            do {
+                return try MeetingInputDeviceLookup.builtInFallbackAfterFailure(
+                    failedInputID: failedSelection?.selectedInput.id
+                )
+            } catch {
+                AppLogger.audioMic.warning("Built-in microphone fallback unavailable", [
+                    "operation": operation,
+                    "error": error.localizedDescription
+                ])
+                return nil
+            }
+        }
+        var fallback = lookupFallback()
+        if MeetingStartMicFallbackPolicy.shouldRetryDeviceLookup(foundFallback: fallback != nil) {
+            Thread.sleep(forTimeInterval: MeetingStartMicFallbackPolicy.deviceLookupRetryDelay)
+            fallback = lookupFallback()
         }
         guard let fallback else {
             AppLogger.audioMic.info("No other built-in microphone to fall back to", [

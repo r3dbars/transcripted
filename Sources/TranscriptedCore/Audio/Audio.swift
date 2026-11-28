@@ -30,6 +30,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// typed `userDeclined` error. Kept separate from display copy so a prior
     /// inconclusive preflight cannot soften a later confirmed denial.
     @Published public internal(set) var systemAudioStartPermissionExplicitlyDenied = false
+    /// True only when this start attempt saw AVCaptureDevice deny (or the
+    /// user declined the prompt). Distinct from a Bluetooth mic that is not
+    /// ready, which must not be reported as a missing Microphone permission.
+    @Published public internal(set) var microphoneStartPermissionExplicitlyDenied = false
 
     // Silence detection for "Still Recording?" prompt
     //

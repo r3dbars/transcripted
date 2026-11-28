@@ -128,6 +128,7 @@ struct SentryEventPolicy: Equatable {
         "stall_stage",
         "stage",
         "start_attempts",
+        "start_failure_cause",
         "start_failure_stage",
         "start_plan",
         "stt_model",

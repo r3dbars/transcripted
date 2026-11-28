@@ -137,10 +137,10 @@ enum NotchIslandDropButtons {
             return buttons
         case .meetingSaved:
             return [.init(title: "Open", role: .primary, action: .meetingOpen)]
-        case .meetingError(_, _, let canOpen, let grantsSystemAudio):
+        case .meetingError(_, _, let canOpen, let grantsSystemAudio, let grantsMicrophone):
             var buttons = [NotchIslandDropButton(title: dismissTitle, role: .standard, action: .meetingDismissError)]
-            if grantsSystemAudio {
-                // The meeting overlay's primary action opens the audio-only
+            if grantsSystemAudio || grantsMicrophone {
+                // The meeting overlay's primary action opens the matching
                 // Settings pane while the start's denial is on screen.
                 buttons.append(.init(title: "Open Settings", role: .primary, action: .meetingOpen))
             } else if canOpen {

@@ -404,6 +404,22 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertFalse(selection.didOverrideDefault)
     }
 
+    func testPrefersAUSBMicWhenBluetoothHasNoBuiltInFallback() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+        let usbMic = device(id: 40, name: "Shure MV7", transport: .usb, channels: 1)
+
+        let selection = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: airPods,
+            availableInputs: [airPods, usbMic]
+        )
+
+        XCTAssertEqual(selection.selectedInput, usbMic)
+        XCTAssertEqual(selection.reason, .preferredBuiltInForBluetoothHeadset)
+        XCTAssertTrue(selection.didOverrideDefault)
+        XCTAssertTrue(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: selection))
+    }
+
     func testKeepsBluetoothInputWhenNoBuiltInFallbackExists() {
         let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
 
