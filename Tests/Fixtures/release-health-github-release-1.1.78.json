@@ -1,0 +1,100 @@
+{
+  "_fixture": {
+    "kind": "Archived live GitHub release metadata; offline test input, not current live release proof",
+    "release_id": 461543626,
+    "captured_at_utc": "2026-11-28T12:34:37.000Z",
+    "published_at_utc": "2026-11-28T12:29:57Z",
+    "candidate_run_id": 46141958077,
+    "signed_artifact_id": 15263156973,
+    "built_source_sha": "65345b65439f379c72850105109ef886803b6b19",
+    "workflow_sha": "e04c855678321a8630ba26dd56cc82fb8e9f0e2d",
+    "publication_note": "GitHub reported the release and uploaded asset IDs, byte lengths and digests after publication."
+  },
+  "assets": [
+    {
+      "contentType": "application/xml",
+      "digest": "sha256:5202fa9f940227ca9c3d58496e21356ea03a79135b0052de954ef9ed61d6c42e",
+      "id": "RA_kwDOQGEUhc4v84gb",
+      "name": "appcast.xml",
+      "size": 93474,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/appcast.xml"
+    },
+    {
+      "contentType": "application/x-apple-diskimage",
+      "digest": "sha256:dc4e6e749c2fb758c16f1b6881472991e5a9f1abbe00480c19f75da982817136",
+      "id": "RA_kwDOQGEUhc4v84gZ",
+      "name": "Transcripted-1.1.78.dmg",
+      "size": 693763900,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted-1.1.78.dmg"
+    },
+    {
+      "contentType": "application/zip",
+      "digest": "sha256:e8dd5c85892b850cdc5030cd4c3a97348938ed0473138a675e554c4170a44a21",
+      "id": "RA_kwDOQGEUhc4v87ov",
+      "name": "Transcripted-1.1.78.dSYM.zip",
+      "size": 17725611,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted-1.1.78.dSYM.zip"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:86e35197e67e594a5e4d321c82a1ebf65f2bf46c83a87b40f3961acf08e87aa0",
+      "id": "RA_kwDOQGEUhc4v86bs",
+      "name": "transcripted-mcp.mcpb",
+      "size": 2638009,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/transcripted-mcp.mcpb"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:fa8b506ab8857218b5f34c16e809d50b3e55fdfa1098ea081c34eea3015da589",
+      "id": "RA_kwDOQGEUhc4v84gP",
+      "name": "Transcripted1.1.78-1.1.73.delta",
+      "size": 6379934,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted1.1.78-1.1.73.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:41ac9c511bc11c09bc5ecd27a078f08b5701c83b8334e4fc1e107604a3274992",
+      "id": "RA_kwDOQGEUhc4v84gc",
+      "name": "Transcripted1.1.78-1.1.74.delta",
+      "size": 6232690,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted1.1.78-1.1.74.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:284984a430e3207b66be57dc64fa7dffd5926a31e42f40cdd54f76925f31497f",
+      "id": "RA_kwDOQGEUhc4v84gQ",
+      "name": "Transcripted1.1.78-1.1.75.delta",
+      "size": 6089734,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted1.1.78-1.1.75.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:4a62fe24b3df227feb191ef334228d895cc13d61f463b16cf7f524862d8d99a6",
+      "id": "RA_kwDOQGEUhc4v84hV",
+      "name": "Transcripted1.1.78-1.1.76.delta",
+      "size": 5812746,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted1.1.78-1.1.76.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:4d353b3f486a5d456e6e03e06ed421d3067f025201efcaf09c3afc38622561a8",
+      "id": "RA_kwDOQGEUhc4v84jK",
+      "name": "Transcripted1.1.78-1.1.77.delta",
+      "size": 4342430,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.78/Transcripted1.1.78-1.1.77.delta"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": false,
+  "tagName": "v1.1.78",
+  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.78"
+}
