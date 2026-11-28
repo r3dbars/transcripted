@@ -1,15 +1,11 @@
 # Contributing to Transcripted
 
 Transcripted is a local Mac app that turns meetings, dictation, and (if you
-turn it on) your writing into Markdown files people and agents can both use.
+turn it on) your writing into plain Markdown files people and AI tools can both use.
 
-Quick repo orientation before you jump in:
-
-- `main` is the current Transcripted product built from the Draft codebase
-- the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
-  and `pre-draft-takeover-2026-04-06`
-- persisted app paths now default to Transcripted-named storage, though some helper names and standalone-tool fallbacks still reflect the Draft transition
-- coding agents should start with `AGENTS.md`
+- Look through `docs/repo-layout.md` for the directory map.
+- Coding agents should start with `AGENTS.md`.
+- Questions or ideas? Start a thread in [GitHub Discussions](https://github.com/r3dbars/transcripted/discussions).
 
 In public docs and user-facing copy, prefer concrete present-tense claims about
 what the product does today. The broader "audio as a context layer" thesis is
@@ -111,7 +107,7 @@ The codebase is organized around the current Transcripted app:
 | Dictation | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture and STT, saved dictation transcripts, hotkey and trigger routing |
 | Meetings | `Sources/Meeting/` | meeting recording, model warmup, transcript flow, bridge into Core |
 | Shared meeting core | `Sources/TranscriptedCore/` | meeting/transcription library and agent artifacts |
-| Writing | `Sources/Writing/`, `Sources/TranscriptedWriting/`, `Sources/TranscriptedKeyboard/` | opt-in autocomplete keyboard and Save my writing (app bridge, library ported from Tilde, IMKit keyboard) |
+| Writing | `Sources/Writing/`, `Sources/TranscriptedWriting/`, `Sources/TranscriptedKeyboard/` | opt-in Capture my writing day files and pass-through IMKit keyboard |
 | UI | `Sources/UI/` | grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
 | Accessibility | `Sources/Accessibility/` | focused-editor metadata, overlay placement, paste-back context |
 | Support | `Sources/Support/` | paths, permissions, preferences, paste, launch-at-login |
@@ -192,4 +188,4 @@ legacy Draft-era artifacts, mention that in the report.
 
 ## Questions?
 
-Open a GitHub issue for questions or discussion.
+Start a thread in [GitHub Discussions](https://github.com/r3dbars/transcripted/discussions) for questions, setup help, or ideas.

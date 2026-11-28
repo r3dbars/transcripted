@@ -14,7 +14,7 @@ tracker:
     - r3dbars
     - justinbetker
 workspace:
-  root: /Users/redbars/code/symphony-workspaces
+  root: ${SYMPHONY_WORKSPACES_ROOT:-~/code/symphony-workspaces}
   clone_url: git@github.com:r3dbars/transcripted.git
 polling:
   interval_ms: 30000

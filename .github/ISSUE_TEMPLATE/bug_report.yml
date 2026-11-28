@@ -1,0 +1,66 @@
+name: Bug Report
+description: Report something that isn't working right in Transcripted
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please redact transcripts, audio, meeting titles, speaker names, emails, tokens, and personal paths before submitting.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Meetings
+        - Dictation
+        - Speakers / Who spoke?
+        - Agent / MCP
+        - Audio or video file import
+        - Capture my writing
+        - Settings, Install, or Updates
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A short description of the bug and what you expected instead.
+      placeholder: Expected... / Actually happened...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: macOS & Transcripted version
+      description: Found under Transcripted sidebar footer or About.
+      placeholder: "e.g., macOS 26.1 (M3 Pro), Transcripted 1.1.77"
+    validations:
+      required: true
+  - type: input
+    id: audio_source
+    attributes:
+      label: Audio setup (if relevant)
+      placeholder: "e.g., Zoom + AirPods Pro, Mac built-in mic, USB headset"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots (optional)
+      description: You can attach redacted screenshots or excerpts from `~/Library/Application Support/Transcripted/logs/debug.log`.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed any private transcripts, audio, meeting titles, speaker names, or personal paths from this report.
+          required: true

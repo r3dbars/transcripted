@@ -35,4 +35,4 @@ Workflows, templates, and the CI contracts that gate merges. Repo-wide rules liv
 
 ## Templates
 
-`ISSUE_TEMPLATE/agent_task.md`, `bug_report.md`, `feature_request.md`, and `PULL_REQUEST_TEMPLATE.md`. The PR template carries the review-verdict and verification fields from `AGENTS.md`; keep them in sync if the review policy changes.
+`ISSUE_TEMPLATE/bug_report.yml`, `feature_request.yml`, `config.yml`, and `PULL_REQUEST_TEMPLATE.md` face public users and contributors. Internal Codex task prompt lives under `.agents/templates/agent_task.md`. Agent PRs still carry the review-verdict and verification fields from `AGENTS.md` and `docs/agent-closeout.md`.
