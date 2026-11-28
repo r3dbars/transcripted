@@ -683,6 +683,8 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingTranscriptSavedPolicy.swift"
     "Sources/Observability/WorkflowRecoveryTelemetry.swift"
     "Sources/Observability/CrashReporterPrivacyOptions.swift"
+    "Sources/Observability/SentrySessionTrackingPolicy.swift"
+    "Sources/Observability/SentrySDKOptionsBuilder.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
     "Sources/Observability/RetentionTelemetry.swift"
