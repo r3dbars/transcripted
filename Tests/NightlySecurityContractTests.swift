@@ -295,8 +295,8 @@ private final class NightlyReleaseFixture {
             inputs.formUnion((manifest["required_build_script_substrings"] as! [String: Any]).keys)
             inputs.formUnion([
                 "config/security/nightly-security-manifest.json",
-                ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/bug_report.md",
-                ".github/ISSUE_TEMPLATE/feature_request.md", "docs/qa-test-bench.md",
+                ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/bug_report.yml",
+                ".github/ISSUE_TEMPLATE/feature_request.yml", "docs/qa-test-bench.md",
                 "docs/privacy-first-observability.md", "docs/release-packaging.md", "scripts/README.md"
             ])
             for relative in inputs where !relative.hasPrefix("build/") {
