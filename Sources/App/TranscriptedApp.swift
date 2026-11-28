@@ -20,6 +20,9 @@ struct TranscriptedApp: App {
         // A write to a dead child's stdin raises SIGPIPE; ignore it so write()
         // returns EPIPE instead of killing the app (possibly mid-recording).
         ProcessSignals.ignoreSIGPIPE()
+        // Before the app delegate (and its updater) write the install keys:
+        // `app_first_launch` needs to know whether this Mac ran Transcripted before.
+        FirstLaunchTelemetry.captureLaunchBaseline()
     }
 
     var body: some Scene {

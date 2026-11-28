@@ -96,6 +96,58 @@ func testAnalyticsReporter() {
         assertEqual(fixture.userDefaults.string(forKey: AnalyticsReporter.activeDayStorageKey), storedDay, "opted-out days are not recorded")
     }
 
+    runSuite("App first launch is sent once, only for a brand-new install") {
+        let fixture = makeAnalyticsReporterFixture(responses: Array(repeating: .networkFailure, count: 8))
+        defer { fixture.cleanup() }
+        func firstLaunches() -> [PendingAnalyticsCapture] {
+            fixture.reporter.persistPendingCapturesNow()
+            return loadBufferedAnalyticsCaptures(from: fixture.bufferURL).filter { $0.event == "app_first_launch" }
+        }
+
+        fixture.reporter.trackFirstLaunchIfNeeded(isFreshInstall: true, installMethod: "homebrew")
+        fixture.reporter.trackFirstLaunchIfNeeded(isFreshInstall: true, installMethod: "homebrew")
+        assertTrue(waitUntil { firstLaunches().count == 1 }, "a second call on the same install sends nothing")
+        let capture = firstLaunches().first
+        assertEqual(capture?.properties["install_method"], "homebrew", "install method is the event's own property")
+        assertEqual(capture?.distinctID, InstallIdentity.id(userDefaults: fixture.userDefaults), "event joins the anonymous install")
+        assertTrue(fixture.userDefaults.bool(forKey: FirstLaunchTelemetry.reportedKey), "marker is stored")
+
+        let upgrade = makeAnalyticsReporterFixture(responses: Array(repeating: .networkFailure, count: 8))
+        defer { upgrade.cleanup() }
+        upgrade.reporter.trackFirstLaunchIfNeeded(isFreshInstall: false, installMethod: "dmg")
+        upgrade.reporter.persistPendingCapturesNow()
+        assertEqual(loadBufferedAnalyticsCaptures(from: upgrade.bufferURL).filter { $0.event == "app_first_launch" }.count, 0,
+                    "an existing install never sends it")
+        assertTrue(upgrade.userDefaults.bool(forKey: FirstLaunchTelemetry.reportedKey), "an existing install is marked so a later launch cannot send it")
+
+        let optedOut = makeAnalyticsReporterFixture(responses: [.networkFailure], analyticsEnabled: { false })
+        defer { optedOut.cleanup() }
+        optedOut.reporter.trackFirstLaunchIfNeeded(isFreshInstall: true, installMethod: "dmg")
+        assertFalse(optedOut.userDefaults.bool(forKey: FirstLaunchTelemetry.reportedKey), "opted-out launches leave the marker alone")
+    }
+
+    runSuite("First launch baseline and install method read only local markers") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure])
+        defer { fixture.cleanup() }
+        assertFalse(FirstLaunchTelemetry.hasExistingInstall(userDefaults: fixture.userDefaults), "an empty defaults domain is a fresh install")
+        for key in FirstLaunchTelemetry.existingInstallKeys {
+            let defaults = UserDefaults(suiteName: "FirstLaunch.\(UUID().uuidString)")!
+            defaults.set("x", forKey: key)
+            assertTrue(FirstLaunchTelemetry.hasExistingInstall(userDefaults: defaults), "\(key) marks an existing install")
+        }
+
+        FirstLaunchTelemetry.resetLaunchBaselineForTesting()
+        assertFalse(FirstLaunchTelemetry.launchBaselineIsFreshInstall, "no baseline means assume an existing install")
+        FirstLaunchTelemetry.captureLaunchBaseline(userDefaults: fixture.userDefaults)
+        fixture.userDefaults.set("1.1.78", forKey: DictationShortcutUpgrade.lastLaunchedAppVersionKey)
+        assertTrue(FirstLaunchTelemetry.launchBaselineIsFreshInstall, "keys written after the baseline do not change it")
+        FirstLaunchTelemetry.resetLaunchBaselineForTesting()
+
+        assertEqual(FirstLaunchTelemetry.installMethod(directoryExists: { $0 == "/opt/homebrew/Caskroom/transcripted" }), "homebrew", "Apple silicon Homebrew")
+        assertEqual(FirstLaunchTelemetry.installMethod(directoryExists: { $0 == "/usr/local/Caskroom/transcripted" }), "homebrew", "Intel Homebrew prefix")
+        assertEqual(FirstLaunchTelemetry.installMethod(directoryExists: { _ in false }), "dmg", "no cask record means the DMG")
+    }
+
     runSuite("Undelivered app active day events outlive the 24-hour retry window") {
         let store = AnalyticsDeliveryBufferStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("unused-\(UUID().uuidString).json"))
         let now = Date(timeIntervalSince1970: 10 * 24 * 60 * 60)

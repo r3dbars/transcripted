@@ -144,7 +144,7 @@ struct AnalyticsDeliveryBufferStore {
         let cutoff = now.timeIntervalSince1970 - ttl
         let digestCutoff = now.timeIntervalSince1970 - 14 * 24 * 60 * 60
         var capped = records
-            .filter { $0.enqueuedAt >= (["usage_digest", "app_active_day"].contains($0.event) ? digestCutoff : cutoff) }
+            .filter { $0.enqueuedAt >= (["usage_digest", "app_active_day", "app_first_launch"].contains($0.event) ? digestCutoff : cutoff) }
             .sorted { lhs, rhs in
                 if lhs.enqueuedAt == rhs.enqueuedAt {
                     return lhs.id < rhs.id

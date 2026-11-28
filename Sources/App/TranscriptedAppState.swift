@@ -161,6 +161,7 @@ class TranscriptedAppState: ObservableObject {
             }
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
+        AnalyticsReporter.shared.trackFirstLaunchIfNeeded()
         AnalyticsReporter.track("app_launched")
         runtimeDiagnostics.setActiveWorkProvider { [weak self] in
             guard let self else { return false }
