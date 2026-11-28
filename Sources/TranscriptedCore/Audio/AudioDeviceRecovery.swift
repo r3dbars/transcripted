@@ -201,6 +201,11 @@ extension Audio {
             return
         }
 
+        // A format-mismatch recovery is about to replace the writer. Clear
+        // the outgoing tap's write-error streak so it cannot trip the cap
+        // after this recovery returns.
+        recordMicWriteSuccess(generation: sessionGeneration)
+
         // The pinned recorder restarts itself on its own device and pads the
         // hole. It never rebuilds an engine graph, which would open the
         // default input first.

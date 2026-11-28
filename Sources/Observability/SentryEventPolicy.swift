@@ -39,6 +39,9 @@ struct SentryEventPolicy: Equatable {
                 tags[key] = "unknown"
             }
         }
+        if let value = tags["stop_cause"], PayloadSanitizationCore.category(value) == nil {
+            tags["stop_cause"] = "unrecorded"
+        }
 
         return SentryPayloadSanitizer.sanitizeTags(tags)
     }

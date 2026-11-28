@@ -690,4 +690,33 @@ func testSentryEventPolicy() {
             "a successful stop is not a Sentry event"
         )
     }
+
+    runSuite("Unexpected capture-stop Sentry events keep stop_cause on tags and extras") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_capture_stopped_under_controller",
+            context: [
+                "stop_cause": "mic_write_failed",
+                "failure_kind": "unexpected_capture_stop",
+                "audio_device": "Jane's AirPods Pro",
+            ]
+        )
+        assertEqual(tags["stop_cause"], "mic_write_failed", "cause must be searchable")
+        assertEqual(tags["failure_kind"], "unexpected_capture_stop")
+        assertNil(tags["audio_device"], "device names stay out of Sentry")
+
+        let timeout = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_stop_timeout",
+            context: ["stop_cause": "unrecorded"]
+        )
+        assertEqual(timeout["stop_cause"], "unrecorded")
+
+        let junk = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_capture_stopped_under_controller",
+            context: ["stop_cause": "Confidential meeting words"]
+        )
+        assertEqual(junk["stop_cause"], "unrecorded", "free text must not become a cause")
+    }
 }

@@ -40,6 +40,34 @@ struct MeetingCaptureHealthEvidence: Equatable {
     }
 }
 
+/// Why a meeting capture stopped, as the `stop_cause` telemetry category.
+/// Names match the code that ended the recording: Core's
+/// `InternalCaptureStopCause` raw values for unexpected stops, and the
+/// session `StopReason` / `RecordingCancelReason` raw values for app-initiated
+/// ones. Empty or missing becomes `unrecorded` so Sentry always has a tag
+/// (APPLE-MACOS-2D).
+enum MeetingCaptureStopCause {
+    static let unrecorded = "unrecorded"
+
+    /// Capture stopped under the controller. Prefer Core's cause.
+    static func unexpected(_ internalCause: String?) -> String {
+        category(internalCause)
+    }
+
+    /// The app asked to stop or discard. Prefer Core's cause if it already
+    /// ended the recording; otherwise the session reason.
+    static func requested(internalCause: String?, reason: String) -> String {
+        let core = category(internalCause)
+        if core != unrecorded { return core }
+        return category(reason)
+    }
+
+    private static func category(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? unrecorded : trimmed
+    }
+}
+
 enum MeetingStopSequence {
     static let unexpectedStopReason: StaticString = "unexpected_capture_stop"
 

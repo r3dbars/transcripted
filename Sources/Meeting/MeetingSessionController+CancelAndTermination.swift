@@ -66,6 +66,10 @@ extension MeetingSessionController {
         // Mirror stopRecording(): cancelled meetings carry the prompt outcome
         // too, so diagnostics can correlate cancellations with the prompt.
         cancelCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcomeForSavedCapture().rawValue
+        cancelCaptureDiagnostics["stop_cause"] = MeetingCaptureStopCause.requested(
+            internalCause: capture.internalStopCause,
+            reason: reason.rawValue
+        )
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -79,7 +83,11 @@ extension MeetingSessionController {
                 "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                 "mic_file_present": boolString(files.micURL != nil),
                 "system_file_present": boolString(files.systemURL != nil),
-                "stop_timed_out": boolString(stopResult.didTimeOut)
+                "stop_timed_out": boolString(stopResult.didTimeOut),
+                "stop_cause": MeetingCaptureStopCause.requested(
+                    internalCause: capture.internalStopCause,
+                    reason: reason.rawValue
+                ),
             ],
             uniquingKeysWith: { _, new in new }
         )
@@ -96,6 +104,10 @@ extension MeetingSessionController {
                 [
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "reason": reason.rawValue,
+                    "stop_cause": MeetingCaptureStopCause.requested(
+                        internalCause: capture.internalStopCause,
+                        reason: reason.rawValue
+                    ),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "system_stream_present": boolString(files.systemURL != nil),
                     "trigger": recordingSnapshot.trigger.rawValue,

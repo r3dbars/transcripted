@@ -69,6 +69,25 @@ final class MicRecoveryFallbackTests: XCTestCase {
         XCTAssertEqual(configurationDecision(recoveryAttemptsUsed: 4), .recover)
     }
 
+    func testRunningEngineWithAMismatchedLiveFormatRecovers() {
+        XCTAssertEqual(
+            configurationDecision(
+                changedEngineIsRunning: true,
+                deliveredNewBuffer: true,
+                liveFormatMatchesRecording: false
+            ),
+            .recover,
+            "a still-running engine at a new rate cannot write the current mic file"
+        )
+        XCTAssertEqual(
+            configurationDecision(
+                changedEngineIsRunning: true,
+                liveFormatMatchesRecording: false
+            ),
+            .recover
+        )
+    }
+
     func testRouteChangeLeavesARunningEngineAlone() {
         // A graph that was still being built can post the change and then
         // start; a slow first frame there is not a stopped mic.
@@ -523,6 +542,7 @@ final class MicRecoveryFallbackTests: XCTestCase {
         isRecovering: Bool = false,
         changedEngineIsRunning: Bool = false,
         deliveredNewBuffer: Bool = false,
+        liveFormatMatchesRecording: Bool = true,
         secondsSinceLastRecoveryEnded: TimeInterval? = nil,
         recoveryAttemptsUsed: Int = 0
     ) -> MicEngineConfigurationChangePolicy.Decision {
@@ -533,6 +553,7 @@ final class MicRecoveryFallbackTests: XCTestCase {
             isRecovering: isRecovering,
             changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: deliveredNewBuffer,
+            liveFormatMatchesRecording: liveFormatMatchesRecording,
             secondsSinceLastRecoveryEnded: secondsSinceLastRecoveryEnded,
             recoveryAttemptsUsed: recoveryAttemptsUsed,
             maxRecoveryAttempts: 5

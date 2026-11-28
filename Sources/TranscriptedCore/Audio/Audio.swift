@@ -397,6 +397,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // that instant. Always nil in the app.
     var afterMicRecoveryWriterRetiredForTesting: (() -> Void)?
 
+    // Test seam: intercepts a mic format-mismatch recovery so tests never
+    // build an engine or touch `inputNode`. Always nil in the app.
+    var micFormatRecoveryHandlerForTesting: ((UInt64) -> Void)?
+
     // Test seam: runs on the advancing thread right after the generation
     // moves, outside the lock. Lets a test deliver a buffer at the exact
     // instant a stale one would arrive. Always nil in the app.
