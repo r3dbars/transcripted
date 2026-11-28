@@ -9,7 +9,7 @@ func testCrashReporterOptions() {
         CrashReporterPrivacyOptions.apply(to: &options)
 
         assertFalse(options.sendDefaultPii, "Sentry must not attach default PII")
-        assertFalse(options.enableAutoSessionTracking, "sessions start only after the crash-reporting choice")
+        assertFalse(options.enableAutoSessionTracking, "privacy apply fails closed; the options builder turns sessions on only after the crash-reporting choice")
         assertFalse(options.enableNetworkBreadcrumbs, "network requests must not become breadcrumbs")
         assertEqual(options.maxBreadcrumbs, UInt(0), "no breadcrumbs are kept")
         assertFalse(options.attachStacktrace, "non-crash events must not carry stack traces")

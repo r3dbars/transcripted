@@ -256,6 +256,7 @@ final class MenuBarPopoverPresentation: NSObject {
 private final class MenuBarPopoverAnchorPanel: NSPanel {
     init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        tabbingMode = .disallowed
     }
 
     override var canBecomeKey: Bool { false }

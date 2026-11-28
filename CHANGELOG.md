@@ -19,6 +19,9 @@ force-installed by Sparkle so existing users recover from a regression.
   or left on the clipboard for ⌘V if the paste cannot be confirmed. A
   password-manager copy that could not be read, a clipboard that changed
   mid-paste, or one too large to set aside is still left alone.
+- Launch no longer builds the Notch island window until you dictate, record a
+  meeting, or get a call prompt. Creating that window at startup was freezing
+  the app for several seconds on some Macs.
 - Dragging the main window onto another display no longer jumps it away from
   the pointer. AppKit was snapping the window mid-drag to the last frame it
   remembered for that display.
