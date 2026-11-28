@@ -97,6 +97,7 @@ allowlist.
 - `usage_digest`
 - `reliability_failure_observed`
 - `app_launched`
+- `app_first_launch`
 - `app_active_day`
 - `app_unclean_shutdown_detected`
 - `app_session_stall_detected`
@@ -451,6 +452,18 @@ and for an unsent current day on normal quit. A quit snapshot has
 in lifecycle events and the local ledger but does not generate a second digest.
 `digest_day` identifies the activity's local date; timestamps identify delivery.
 Calendar arithmetic handles local midnight and DST rather than adding 24 hours.
+
+`app_first_launch` is sent once, the first time a brand-new install launches
+with anonymous usage on. Its only own property is `install_method`: `homebrew`
+when a Homebrew Cask folder for `transcripted` exists, else `dmg`. It carries
+the same shared defaults and telemetry context as `app_launched`, so version,
+OS major and build channel are already on it. The app never learns which web
+page or link led to the download. A Mac that already has the anonymous install
+ID, the first-observed day, or a remembered launched version has run an older
+build and never sends it; `FirstLaunchTelemetry.captureLaunchBaseline()` reads
+those keys at process start, before the updater writes them. The only stored
+value is the `analyticsFirstLaunchReported` marker. An undelivered copy stays in
+the retry buffer for 14 days, like `app_active_day`.
 
 `app_active_day` is sent at most once per local day from the same minute timer
 while the app is running and anonymous usage is on. It has no properties of its

@@ -3,7 +3,7 @@ import Foundation
 /// App-generated identity only. Never derived from hardware, account, email, or content.
 enum InstallIdentity {
     static let storageKey = "observability-anonymous-analytics-id"
-    private static let firstLaunchKey = "observability-first-launch-day"
+    static let firstLaunchKey = "observability-first-launch-day"
     private static let lock = NSLock()
 
     static func id(userDefaults: UserDefaults = .standard) -> String {

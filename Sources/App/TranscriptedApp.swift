@@ -20,6 +20,9 @@ struct TranscriptedApp: App {
         // A write to a dead child's stdin raises SIGPIPE; ignore it so write()
         // returns EPIPE instead of killing the app (possibly mid-recording).
         ProcessSignals.ignoreSIGPIPE()
+        // Before the app delegate (and its updater) write the install keys:
+        // `app_first_launch` needs to know whether this Mac ran Transcripted before.
+        FirstLaunchTelemetry.captureLaunchBaseline()
         // Before SwiftUI's Settings scene or any NSWindow exists: window
         // tabbing is how AppKit first builds the Window menu's Sidecar items,
         // whose device cache then hangs the main thread on XPC
